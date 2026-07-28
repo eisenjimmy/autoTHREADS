@@ -557,55 +557,108 @@ export type MentionsFetchResult = {
   items: UnansweredReply[]
   /** Set when the Mentions API call failed (e.g. missing threads_manage_mentions). */
   error?: string
+  /** Raw media objects returned by the API before local filters. */
+  rawCount?: number
+  /** How many were dropped as already answered (local or Graph probe). */
+  skippedAnswered?: number
 }
 
 /**
  * Public posts where another profile @mentioned you (Threads Mentions API).
- * Always queries `/me/mentions` (more reliable than a stored user id).
- * Requires `threads_manage_mentions` on the access token.
+ * Tries `/me/mentions` then numeric user id. Paginates. Requires
+ * `threads_manage_mentions` on the access token.
+ *
+ * Note (Meta): without Advanced Access for threads_manage_mentions, only
+ * mentions from app Testers are returned — everyone else yields an empty list.
  */
-export async function fetchUnansweredMentions(cfg: ThreadsCfg): Promise<MentionsFetchResult> {
+export async function fetchUnansweredMentions(
+  cfg: ThreadsCfg,
+  alreadyAnsweredIds?: Set<string>
+): Promise<MentionsFetchResult> {
   const me = await apiGet<{ id?: string; username?: string }>(cfg, '/me', { fields: 'id,username' })
   const myUsername = (typeof me.username === 'string' ? me.username : '').toLowerCase()
+  const myId = typeof me.id === 'string' && /^\d+$/.test(me.id) ? me.id : ''
 
   // Recent window — Meta requires since >= 1688540400.
   const since = Math.max(1688540400, Math.floor(Date.now() / 1000) - 14 * 24 * 3600)
+  const until = Math.floor(Date.now() / 1000)
   const fields =
     'id,text,username,timestamp,permalink,shortcode,media_type,is_reply,owner{id,username}'
 
-  let data: { data?: RawMention[] }
-  try {
-    // Prefer `me` — wrong numeric User ID in settings previously returned empty/errors.
-    data = await apiGet(cfg, '/me/mentions', {
-      fields,
-      limit: '50',
-      since: String(since),
-    })
-  } catch (err) {
-    const message = errText(err)
-    console.warn('[threads] /me/mentions failed:', message)
-    // Fallback without since (some tokens reject the param).
+  type MentionsPage = {
+    data?: RawMention[]
+    paging?: { cursors?: { after?: string }; next?: string }
+  }
+
+  async function fetchPath(path: string): Promise<{ pages: RawMention[]; error?: string }> {
+    const collected: RawMention[] = []
+    let after: string | undefined
     try {
-      data = await apiGet(cfg, '/me/mentions', { fields, limit: '50' })
-    } catch (err2) {
-      const msg = errText(err2)
-      console.warn('[threads] mentions fetch failed (need threads_manage_mentions?):', msg)
-      return {
-        items: [],
-        error:
-          `Mentions API failed: ${msg}. ` +
-          'Regenerate your Threads token with the threads_manage_mentions permission.',
+      for (let page = 0; page < 5; page++) {
+        const params: Record<string, string> = {
+          fields,
+          limit: '50',
+          since: String(since),
+          until: String(until),
+        }
+        if (after) params.after = after
+        const data = await apiGet<MentionsPage>(cfg, path, params)
+        const batch = data.data ?? []
+        collected.push(...batch)
+        after = data.paging?.cursors?.after
+        if (!after || batch.length === 0) break
+      }
+      return { pages: collected }
+    } catch (err) {
+      const message = errText(err)
+      // Fallback without since/until (some tokens reject the params).
+      try {
+        const data = await apiGet<MentionsPage>(cfg, path, { fields, limit: '50' })
+        return { pages: data.data ?? [] }
+      } catch (err2) {
+        return { pages: [], error: errText(err2) || message }
       }
     }
   }
 
-  const raw = data.data ?? []
+  // Prefer `me`; also try numeric id when present (some tokens behave differently).
+  let raw: RawMention[] = []
+  let lastError: string | undefined
+  const paths = ['/me/mentions', ...(myId ? [`/${myId}/mentions`] : [])]
+  for (const path of paths) {
+    const res = await fetchPath(path)
+    if (res.pages.length > 0) {
+      raw = res.pages
+      lastError = undefined
+      break
+    }
+    if (res.error) lastError = res.error
+  }
+
+  if (raw.length === 0 && lastError) {
+    console.warn('[threads] mentions fetch failed (need threads_manage_mentions?):', lastError)
+    return {
+      items: [],
+      rawCount: 0,
+      skippedAnswered: 0,
+      error:
+        `Mentions API failed: ${lastError}. ` +
+        'Regenerate your Threads token with the threads_manage_mentions permission. ' +
+        'Without Advanced Access, only mentions from Meta app Testers appear.',
+    }
+  }
+
   console.info(`[threads] mentions API returned ${raw.length} media object(s)`)
 
+  // De-dupe by media id across pages / path retries.
+  const seenMedia = new Set<string>()
   const out: UnansweredReply[] = []
+  let skippedAnswered = 0
   let probeBudget = ANSWER_PROBE_BUDGET
   for (const m of raw) {
     if (typeof m.id !== 'string' || !m.id) continue
+    if (seenMedia.has(m.id)) continue
+    seenMedia.add(m.id)
 
     // username is not always present on mention media — fall back to owner.username.
     let username =
@@ -617,16 +670,25 @@ export async function fetchUnansweredMentions(cfg: ThreadsCfg): Promise<Mentions
     if (!username) username = 'someone'
     if (myUsername && username.toLowerCase() === myUsername) continue
 
+    // Already handled locally (posted/drafted) — don't re-probe Graph.
+    if (alreadyAnsweredIds?.has(m.id)) {
+      skippedAnswered++
+      continue
+    }
+
     // Media-only mentions may have empty text — still replyable.
     const text =
       typeof m.text === 'string' && m.text.trim()
         ? m.text.trim()
         : '(mentioned you in a post)'
 
-    // Skip mentions we already answered under (best-effort).
+    // Skip mentions we already answered under (best-effort Graph probe).
     if (probeBudget > 0 && myUsername) {
       probeBudget--
-      if (await isAnsweredByMe(cfg, m.id, myUsername)) continue
+      if (await isAnsweredByMe(cfg, m.id, myUsername)) {
+        skippedAnswered++
+        continue
+      }
     }
 
     out.push({
@@ -640,7 +702,21 @@ export async function fetchUnansweredMentions(cfg: ThreadsCfg): Promise<Mentions
       kind: 'mention',
     })
   }
-  return { items: out }
+
+  if (raw.length === 0) {
+    // Empty is often Advanced Access, not a hard error — surface a clear hint.
+    return {
+      items: [],
+      rawCount: 0,
+      skippedAnswered: 0,
+      error:
+        'Mentions API returned 0 items. If people @mention you but nothing shows: ' +
+        'Meta only returns non-tester mentions after Advanced Access for threads_manage_mentions. ' +
+        'Also confirm the token was regenerated after enabling that permission.',
+    }
+  }
+
+  return { items: out, rawCount: raw.length, skippedAnswered }
 }
 
 /**
@@ -658,29 +734,42 @@ export async function fetchUnansweredReplies(
 
 export async function fetchUnansweredEngagement(
   cfg: ThreadsCfg,
-  opts?: { includeMentions?: boolean }
+  opts?: { includeMentions?: boolean; alreadyAnsweredIds?: Set<string> }
 ): Promise<{
   replies: UnansweredReply[]
   mentionError?: string
+  mentionRawCount?: number
+  mentionSkippedAnswered?: number
   threadCap: ThreadReplyCapStats
 }> {
   const includeMentions = opts?.includeMentions !== false
   const { replies, threadCap } = await fetchUnansweredPostReplies(cfg)
   let mentions: UnansweredReply[] = []
   let mentionError: string | undefined
+  let mentionRawCount = 0
+  let mentionSkippedAnswered = 0
   if (includeMentions) {
-    const m = await fetchUnansweredMentions(cfg)
+    const m = await fetchUnansweredMentions(cfg, opts?.alreadyAnsweredIds)
     mentions = m.items
     mentionError = m.error
+    mentionRawCount = m.rawCount ?? 0
+    mentionSkippedAnswered = m.skippedAnswered ?? 0
   }
-  const seen = new Set(replies.map((r) => r.id))
-  const out = [...replies]
-  for (const item of mentions) {
+  // Mentions first (higher priority), then post replies; de-dupe by id.
+  const seen = new Set<string>()
+  const out: UnansweredReply[] = []
+  for (const item of [...mentions, ...replies]) {
     if (seen.has(item.id)) continue
     seen.add(item.id)
     out.push(item)
   }
-  out.sort((a, b) => replyTimestamp(b.timestamp) - replyTimestamp(a.timestamp))
   // Cap inbox size but keep room for nested replies across recent posts.
-  return { replies: out.slice(0, 100), mentionError, threadCap }
+  // Keep mention priority when trimming: mentions already lead the list.
+  return {
+    replies: out.slice(0, 100),
+    mentionError,
+    mentionRawCount,
+    mentionSkippedAnswered,
+    threadCap,
+  }
 }

@@ -44,7 +44,11 @@ const AP_ANSWERED = 'autopilotAnswered'
 const AP_DISCOVER_ANSWERED = 'autopilotDiscoverAnswered'
 const AP_DISCOVER_DAY = 'autopilotDiscoverDay'
 const AP_DISCOVER_COUNT = 'autopilotDiscoverToday'
+/** When set, last scheduled post tick was a sporadic skip — next tick must post. */
+const AP_SPORADIC_SKIPPED = 'autopilotSporadicSkipped'
 const LOG_LIMIT = 80
+/** Chance to skip a scheduled post tick when sporadicPosts is on (never consecutive). */
+const SPORADIC_SKIP_CHANCE = 0.18
 
 /**
  * Category id → news search seed tuned for Threads-native niches.
@@ -117,14 +121,11 @@ function localizeUnconfigured(en: string): string {
 
 /** Mentions API failure (threadsApi) → Korean for the activity log. */
 function localizeMentionError(en: string): string {
-  if (/Mentions API failed/i.test(en)) {
-    const detail = en.replace(/^Mentions API failed:\s*/i, '').replace(
-      /\s*Regenerate your Threads token with the threads_manage_mentions permission\.?/i,
-      ''
-    )
+  if (/Mentions API failed/i.test(en) || /returned 0 items/i.test(en) || /Advanced Access/i.test(en)) {
     return (
-      `멘션 API 실패: ${detail.trim()}. ` +
-      'threads_manage_mentions 권한이 있는 Threads 토큰을 다시 발급하세요.'
+      '멘션 API 문제: Meta Advanced Access(threads_manage_mentions)가 없으면 테스터 멘션만 보입니다. ' +
+      '권한을 켠 뒤 액세스 토큰을 다시 발급하세요. ' +
+      en.replace(/^Mentions API failed:\s*/i, '').slice(0, 180)
     )
   }
   return en
@@ -313,7 +314,10 @@ async function commitDraft(draft: Draft, goLive: boolean): Promise<{ ok: boolean
   return { ...res, permalink: fresh?.permalink }
 }
 
-async function runPostPhase(postsToday: number): Promise<number> {
+async function runPostPhase(
+  postsToday: number,
+  reason: 'scheduled' | 'manual' = 'scheduled'
+): Promise<number> {
   const settings = getSettings()
   const ap = settings.autopilot
   const remainingDay = ap.maxPostsPerDay - postsToday
@@ -329,19 +333,22 @@ async function runPostPhase(postsToday: number): Promise<number> {
     return 0
   }
 
-  // "Here and there" — randomly skip some ticks so the account doesn't post like a clock.
-  if (ap.sporadicPosts) {
-    // ~45% chance to skip this post tick (still runs replies/mentions separately).
-    if (Math.random() < 0.45) {
+  // "Here and there" — occasionally skip a scheduled tick so cadence isn't a metronome.
+  // Never skip: manual Run once, or two ticks in a row (was ~45% and starved posts).
+  if (ap.sporadicPosts && reason === 'scheduled') {
+    const lastWasSkip = db.get<boolean>(AP_SPORADIC_SKIPPED) === true
+    if (!lastWasSkip && Math.random() < SPORADIC_SKIP_CHANCE) {
+      void db.set(AP_SPORADIC_SKIPPED, true)
       log(
         'skip',
         tLog(
-          'Sporadic posts: sitting this one out (looks more human).',
-          '간헐 게시: 이번 회차는 건너뜁니다 (더 자연스럽게).'
+          'Sporadic posts: sitting this one out (looks more human). Next post tick will run.',
+          '간헐 게시: 이번 회차는 건너뜁니다 (더 자연스럽게). 다음 게시 틱은 실행됩니다.'
         )
       )
       return 0
     }
+    void db.set(AP_SPORADIC_SKIPPED, false)
   }
 
   // Know what she already posted — avoid repeating the same topic/angle.
@@ -369,7 +376,7 @@ async function runPostPhase(postsToday: number): Promise<number> {
     source: c.source,
     category: c.category,
   }))
-  const plan = await decideAutopilotPlan({
+  let plan = await decideAutopilotPlan({
     candidates: slim,
     maxPosts: budget,
     postsToday,
@@ -380,6 +387,35 @@ async function runPostPhase(postsToday: number): Promise<number> {
       ? tLog(' (fallback)', ' (대체 계획)')
       : ''
     log('info', tLog(`Plan: ${plan.reasoning}${fallback}`, `계획: ${plan.reasoning}${fallback}`))
+  }
+  // Never leave a scheduled post tick with nothing when we still have budget —
+  // empty LLM plans previously caused multi-hour gaps between sporadic skips.
+  if (plan.items.length === 0 && budget > 0) {
+    const niches =
+      ap.categories.length > 0
+        ? ap.categories
+        : ['ai', 'technology', 'startups', 'productivity', 'humor']
+    const forced =
+      rich.length > 0
+        ? {
+            kind: 'news' as const,
+            index: rich[0].index,
+            category: rich[0].category,
+            angle: 'forced news take — planner returned empty',
+          }
+        : {
+            kind: 'original' as const,
+            category: niches[Math.floor(Math.random() * niches.length)],
+            angle: 'forced original — no fresh headlines this tick',
+          }
+    plan = { ...plan, items: [forced], usedFallback: true }
+    log(
+      'info',
+      tLog(
+        'Planner returned no posts — forcing one item so the feed stays active.',
+        '계획이 비어 있어 피드를 유지하도록 게시 1건을 강제합니다.'
+      )
+    )
   }
   if (plan.items.length === 0) {
     log(
@@ -549,15 +585,48 @@ async function runReplyPhase(repliesToday: number): Promise<number> {
           ? tLog('Scanning replies + @mentions…', '답글 + @멘션 확인 중…')
           : tLog('Scanning replies…', '답글 확인 중…')
       )
+      // Local answered set so mentions don't re-probe Graph for done work.
+      const priorAnswered = new Set(
+        (db.get<string[]>(AP_ANSWERED) ?? []).filter((x) => typeof x === 'string')
+      )
+      // Also treat successfully posted reply drafts as answered targets.
+      for (const d of allDrafts()) {
+        if (d.kind === 'reply' && d.replyToId && d.status === 'posted') priorAnswered.add(d.replyToId)
+      }
       const fetched = await fetchUnansweredEngagement(settings.threads, {
         includeMentions: ap.replyToMentions,
+        alreadyAnsweredIds: priorAnswered,
       })
       if (fetched.mentionError) {
+        // Soft hint when API returned 0 (Advanced Access) — info, not a hard crash.
+        const softEmpty =
+          /returned 0 items|Advanced Access/i.test(fetched.mentionError) &&
+          (fetched.mentionRawCount ?? 0) === 0
         log(
-          'error',
+          softEmpty ? 'info' : 'error',
           tLog(
             fetched.mentionError,
-            localizeMentionError(fetched.mentionError)
+            softEmpty
+              ? '멘션 API가 0건을 반환했습니다. Meta Advanced Access(threads_manage_mentions) 미승인 시 테스터 멘션만 보입니다. 권한 켠 뒤 토큰을 다시 발급하세요.'
+              : localizeMentionError(fetched.mentionError)
+          )
+        )
+      } else if (ap.replyToMentions) {
+        log(
+          'info',
+          tLog(
+            `Mentions API: ${fetched.mentionRawCount ?? 0} raw, ` +
+              `${(fetched.replies ?? []).filter((r) => r.kind === 'mention').length} unanswered` +
+              (fetched.mentionSkippedAnswered
+                ? ` (${fetched.mentionSkippedAnswered} already answered)`
+                : '') +
+              '.',
+            `멘션 API: 원본 ${fetched.mentionRawCount ?? 0}건, ` +
+              `미답변 ${(fetched.replies ?? []).filter((r) => r.kind === 'mention').length}건` +
+              (fetched.mentionSkippedAnswered
+                ? ` (이미 답함 ${fetched.mentionSkippedAnswered})`
+                : '') +
+              '.'
           )
         )
       }
@@ -623,15 +692,22 @@ async function runReplyPhase(repliesToday: number): Promise<number> {
   const handle = ap.creatorHandle.trim().toLowerCase()
   const budget = Math.min(ap.maxRepliesPerRun, remainingDay)
 
+  // Mentions first (API already orders them first; re-sort to be safe).
+  replies = [
+    ...replies.filter((r) => r.kind === 'mention'),
+    ...replies.filter((r) => r.kind !== 'mention'),
+  ]
+
+  const mentionCandidates = replies.filter((r) => r.kind === 'mention').length
   log(
     'info',
     tLog(
-      `Found ${replies.length} candidate reply/mention(s).`,
-      `답글/멘션 후보 ${replies.length}개 발견.`
+      `Found ${replies.length} candidate(s) (${mentionCandidates} @mention(s), ${replies.length - mentionCandidates} reply(ies)).`,
+      `후보 ${replies.length}개 (@멘션 ${mentionCandidates}, 답글 ${replies.length - mentionCandidates}).`
     )
   )
 
-  // Deterministic per-thread stop (same hard cap as fetch). Mentions have no root post.
+  // Deterministic per-thread stop (same hard cap as fetch). Mentions are not capped by root.
   const repliedThisRunByRoot = new Map<string, number>()
 
   for (const r of replies) {
@@ -1000,7 +1076,7 @@ async function runAutopilotPass(
       jobs.push(
         (async () => {
           await db.set(AP_LAST_RUN, now)
-          await runPostPhase(posts)
+          await runPostPhase(posts, reason)
         })()
       )
     }

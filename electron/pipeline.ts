@@ -761,7 +761,12 @@ export async function decideAutopilotPlan(input: {
 
   let raw = ''
   try {
-    raw = await generateText(settings.llm, system, user)
+    // Planning needs more headroom than a short post — temporarily raise maxTokens.
+    const planLlm = {
+      ...settings.llm,
+      maxTokens: Math.max(settings.llm.maxTokens ?? 500, 1024),
+    }
+    raw = await generateText(planLlm, system, user)
   } catch (err) {
     console.error('[pipeline] autopilot planning call failed', err)
     return {

@@ -657,8 +657,8 @@ export default function AutopilotView() {
               </label>
               <span className="hint">
                 {t(
-                  'When on, randomly skips some post ticks so you don’t publish like a metronome.',
-                  '켜면 게시 주기를 가끔 건너뛰어 시계처럼 올리지 않습니다.',
+                  'When on, lightly skips ~18% of scheduled post ticks (never two in a row; Run once always posts).',
+                  '켜면 예약 게시 틱의 약 18%만 건너뜁니다 (연속 스킵 없음; 한 번 실행은 항상 게시).',
                 )}
               </span>
             </div>
@@ -711,6 +711,12 @@ export default function AutopilotView() {
               {t(
                 'Long threads: each post is hard-capped at 20 unanswered replies (newest first). Older ones are skipped so Full-Auto never chases viral comment storms forever.',
                 '긴 스레드: 게시물당 미답변 답글은 최대 20개(최신 우선)로 고정 제한됩니다. 그 이전 답글은 건너뛰어 바이럴 댓글 폭주를 끝없이 따라가지 않습니다.'
+              )}
+            </div>
+            <div className="hint" style={{ marginBottom: 10 }}>
+              {t(
+                '@Mentions: without Meta Advanced Access for threads_manage_mentions, the API only returns mentions from app Testers — everyone else appears as 0. Activity log shows Mentions API raw counts.',
+                '@멘션: Meta Advanced Access(threads_manage_mentions)가 없으면 앱 테스터의 멘션만 API에 보입니다. 그 외는 0건. 활동 로그에 멘션 API 원본 건수가 표시됩니다.'
               )}
             </div>
             <div className="field">
