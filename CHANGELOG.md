@@ -9,6 +9,14 @@ Session-level notes also live under `_changelog/`.
 
 ---
 
+## [0.2.12] — 2026-07-28
+
+### Added
+
+- **Configurable LLM max tokens** in Settings → AI provider (default **500** = Threads post character limit; range 64–8192). Applied to Claude, OpenAI, Gemini, Local, and Other providers.
+
+---
+
 ## [0.2.11] — 2026-07-28
 
 ### Added

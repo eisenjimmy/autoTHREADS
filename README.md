@@ -11,7 +11,7 @@ control, or hand the wheel to a self-running agent that posts and replies on its
 
 <br />
 
-![Version](https://img.shields.io/badge/version-0.2.11-111111?style=flat-square)
+![Version](https://img.shields.io/badge/version-0.2.12-111111?style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-111111?style=flat-square)
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-111111?style=flat-square)
 <br />
@@ -33,11 +33,12 @@ control, or hand the wheel to a self-running agent that posts and replies on its
 ---
 
 > [!TIP]
-> **Current release: v0.2.11.** Full-Auto includes **live news + interactive voice** (news posts
+> **Current release: v0.2.12.** Full-Auto includes **live news + interactive voice** (news posts
 > **append the source article link**), dual post/reply timers, @mentions, nested thread replies,
 > a **hard 20-unanswered cap per long thread**, sporadic posting, optional discover, anti-repeat
-> memory, removable topic pills, Korean activity log, and **Settings + Full-Auto bilingual
-> EN/한국어**. See [Full-Auto](#-full-auto-mode) and [CHANGELOG.md](CHANGELOG.md).
+> memory, removable topic pills, Korean activity log, **configurable LLM max tokens** (default 500),
+> and **Settings + Full-Auto bilingual EN/한국어**. See [Full-Auto](#-full-auto-mode) and
+> [CHANGELOG.md](CHANGELOG.md).
 
 ## Contents
 
@@ -243,7 +244,7 @@ npm run package:win    # Windows
 npm run package:all    # both
 ```
 
-Prebuilt macOS + Windows installers: [GitHub Releases](https://github.com/eisenjimmy/autoTHREADS/releases) (latest **v0.2.11**).
+Prebuilt macOS + Windows installers: [GitHub Releases](https://github.com/eisenjimmy/autoTHREADS/releases) (latest **v0.2.12**).
 
 > Apps are not notarized yet. On first open: right-click → **Open** (or allow under Privacy & Security).
 
@@ -551,7 +552,7 @@ npm run build
 npm start
 ```
 
-설치 파일 (macOS + Windows): [Releases](https://github.com/eisenjimmy/autoTHREADS/releases) (최신 **v0.2.11**)
+설치 파일 (macOS + Windows): [Releases](https://github.com/eisenjimmy/autoTHREADS/releases) (최신 **v0.2.12**)
 
 ## AI 설정
 
