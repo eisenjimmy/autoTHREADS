@@ -231,6 +231,12 @@ export interface BridgeApi {
     replies: UnansweredReply[]
     message: string
     mentionError?: string | null
+    /** Present when long conversations were cut at maxPerThread unanswered each. */
+    threadCap?: {
+      maxPerThread: number
+      threadsTruncated: number
+      dropped: number
+    } | null
   }>
   draftsAll(): Promise<Draft[]>
   draftUpsert(draft: Draft): Promise<Draft[]>

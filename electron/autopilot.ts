@@ -1,7 +1,11 @@
 import { db } from './localdb'
 import { getSettings } from './settings'
 import { fetchTopicNews } from './news'
-import { fetchUnansweredEngagement, searchKeywordPosts } from './threadsApi'
+import {
+  fetchUnansweredEngagement,
+  MAX_UNANSWERED_REPLIES_PER_THREAD,
+  searchKeywordPosts,
+} from './threadsApi'
 import { allDrafts, upsertDraft } from './drafts'
 import { postDraftNow } from './scheduler'
 import {
@@ -556,6 +560,18 @@ async function runReplyPhase(repliesToday: number): Promise<number> {
           )
         )
       }
+      if (fetched.threadCap.threadsTruncated > 0) {
+        const { maxPerThread, threadsTruncated, dropped } = fetched.threadCap
+        log(
+          'info',
+          tLog(
+            `Long-thread cap: stopped after ${maxPerThread} unanswered per post ` +
+              `(${threadsTruncated} thread(s), ${dropped} older reply(ies) skipped).`,
+            `긴 스레드 한도: 게시물당 미답변 ${maxPerThread}개 이후 중단 ` +
+              `(${threadsTruncated}개 스레드, 이전 답글 ${dropped}개 건너뜀).`
+          )
+        )
+      }
       replies = fetched.replies
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err)
@@ -614,11 +630,18 @@ async function runReplyPhase(repliesToday: number): Promise<number> {
     )
   )
 
+  // Deterministic per-thread stop (same hard cap as fetch). Mentions have no root post.
+  const repliedThisRunByRoot = new Map<string, number>()
+
   for (const r of replies) {
     if (sent >= budget) break
     if (answered.has(r.id) || blockedIds.has(r.id)) continue
     const kind = r.kind === 'mention' ? 'mention' : 'reply'
     const isMention = kind === 'mention'
+    if (!isMention && r.rootPostId) {
+      const n = repliedThisRunByRoot.get(r.rootPostId) ?? 0
+      if (n >= MAX_UNANSWERED_REPLIES_PER_THREAD) continue
+    }
 
     // Retry an existing failed draft for this target instead of re-generating.
     const failedExisting = allDrafts().find(
@@ -631,6 +654,9 @@ async function runReplyPhase(repliesToday: number): Promise<number> {
         void db.set(AP_ANSWERED, [...answered].slice(-1000))
         sent++
         void db.set(AP_REPLIES, repliesToday + sent)
+        if (!isMention && r.rootPostId) {
+          repliedThisRunByRoot.set(r.rootPostId, (repliedThisRunByRoot.get(r.rootPostId) ?? 0) + 1)
+        }
         const fresh = allDrafts().find((d) => d.id === failedExisting.id)
         log(
           'reply',
@@ -706,6 +732,9 @@ async function runReplyPhase(repliesToday: number): Promise<number> {
       void db.set(AP_ANSWERED, [...answered].slice(-1000))
       sent++
       void db.set(AP_REPLIES, repliesToday + sent)
+      if (!isMention && r.rootPostId) {
+        repliedThisRunByRoot.set(r.rootPostId, (repliedThisRunByRoot.get(r.rootPostId) ?? 0) + 1)
+      }
       log(
         'reply',
         isMention
@@ -717,6 +746,9 @@ async function runReplyPhase(repliesToday: number): Promise<number> {
       void db.set(AP_ANSWERED, [...answered].slice(-1000))
       sent++
       void db.set(AP_REPLIES, repliesToday + sent)
+      if (!isMention && r.rootPostId) {
+        repliedThisRunByRoot.set(r.rootPostId, (repliedThisRunByRoot.get(r.rootPostId) ?? 0) + 1)
+      }
       log(
         'reply',
         isMention

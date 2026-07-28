@@ -21,6 +21,7 @@ export default function RepliesView() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [mentionWarning, setMentionWarning] = useState<string | null>(null)
+  const [threadCapNote, setThreadCapNote] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
   const [filter, setFilter] = useState<Filter>('all')
 
@@ -28,11 +29,22 @@ export default function RepliesView() {
     setLoading(true)
     setError(null)
     setMentionWarning(null)
+    setThreadCapNote(null)
     try {
       const res = await window.api.unansweredReplies()
       if (res.ok) {
         setReplies(res.replies)
         if (res.mentionError) setMentionWarning(res.mentionError)
+        const cap = res.threadCap
+        if (cap && cap.threadsTruncated > 0) {
+          setThreadCapNote(
+            ko
+              ? `긴 스레드는 게시물당 미답변 ${cap.maxPerThread}개(최신 우선)로 제한됩니다. ` +
+                  `${cap.threadsTruncated}개 스레드가 한도에 걸려 이전 답글 ${cap.dropped}개가 숨겨졌습니다.`
+              : `Long threads are capped at ${cap.maxPerThread} unanswered replies each (newest first). ` +
+                  `${cap.threadsTruncated} thread(s) hit the limit — ${cap.dropped} older reply(ies) hidden.`
+          )
+        }
       } else {
         setReplies(null)
         setError(res.message)
@@ -43,7 +55,7 @@ export default function RepliesView() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [ko])
 
   useEffect(() => {
     void load()
@@ -147,6 +159,12 @@ export default function RepliesView() {
             <button className="btn small" onClick={() => setView('settings')}>
               {text.openSettings}
             </button>
+          </div>
+        )}
+
+        {threadCapNote && (
+          <div className="hint" style={{ margin: '0 14px 10px' }}>
+            {threadCapNote}
           </div>
         )}
 

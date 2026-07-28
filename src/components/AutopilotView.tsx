@@ -707,6 +707,12 @@ export default function AutopilotView() {
                 '내 게시물 미답변 답글과 @멘션에 응대합니다. 멘션은 토큰에 threads_manage_mentions가 필요합니다 (Meta에서 권한 켠 뒤 토큰을 다시 발급하세요).'
               )}
             </div>
+            <div className="hint" style={{ marginBottom: 10 }}>
+              {t(
+                'Long threads: each post is hard-capped at 20 unanswered replies (newest first). Older ones are skipped so Full-Auto never chases viral comment storms forever.',
+                '긴 스레드: 게시물당 미답변 답글은 최대 20개(최신 우선)로 고정 제한됩니다. 그 이전 답글은 건너뛰어 바이럴 댓글 폭주를 끝없이 따라가지 않습니다.'
+              )}
+            </div>
             <div className="field">
               <label className="toggle">
                 <input
@@ -813,11 +819,17 @@ export default function AutopilotView() {
                       className="input"
                       type="number"
                       min={1}
-                      max={25}
+                      max={20}
                       value={form.maxRepliesPerRun}
                       onChange={(e) => edit({ maxRepliesPerRun: e.target.valueAsNumber })}
-                      onBlur={() => edit({ maxRepliesPerRun: num(form.maxRepliesPerRun, 1, 25, 5) })}
+                      onBlur={() => edit({ maxRepliesPerRun: num(form.maxRepliesPerRun, 1, 20, 5) })}
                     />
+                    <span className="hint">
+                      {t(
+                        'Per Full-Auto tick (max 20). Separate from the per-post long-thread cap of 20.',
+                        '실행 1회 한도(최대 20). 게시물당 긴 스레드 한도 20과는 별개입니다.'
+                      )}
+                    </span>
                   </div>
                   <div className="field grow">
                     <span className="field-label">{t('Max replies / day', '하루 최대 답글')}</span>

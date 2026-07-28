@@ -273,7 +273,8 @@ function normalizeAutopilot(
     replyToAll: typeof r.replyToAll === 'boolean' ? r.replyToAll : d.replyToAll,
     replyToMentions: typeof r.replyToMentions === 'boolean' ? r.replyToMentions : d.replyToMentions,
     autoReply: typeof r.autoReply === 'boolean' ? r.autoReply : d.autoReply,
-    maxRepliesPerRun: clampInt(r.maxRepliesPerRun, 1, 25, d.maxRepliesPerRun),
+    // Hard upper bound 20 — matches MAX_UNANSWERED_REPLIES_PER_THREAD per conversation.
+    maxRepliesPerRun: clampInt(r.maxRepliesPerRun, 1, 20, d.maxRepliesPerRun),
     maxRepliesPerDay: clampInt(r.maxRepliesPerDay, 1, 300, d.maxRepliesPerDay),
     sporadicPosts: typeof r.sporadicPosts === 'boolean' ? r.sporadicPosts : d.sporadicPosts,
     liveNewsInteractive:

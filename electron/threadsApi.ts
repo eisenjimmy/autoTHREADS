@@ -412,6 +412,24 @@ async function fetchReplyMessages(
 const ANSWER_PROBE_BUDGET = 80
 const REPLY_EXPAND_BUDGET = 60
 
+/**
+ * Hard stop for long Threads conversations.
+ * Per root post, at most this many unanswered replies are returned (newest first).
+ * Not configurable — keeps Full-Auto and the Replies page deterministic on viral threads.
+ */
+export const MAX_UNANSWERED_REPLIES_PER_THREAD = 20
+
+export type ThreadReplyCapStats = {
+  maxPerThread: number
+  threadsTruncated: number
+  dropped: number
+}
+
+const replyTimestamp = (s: string): number => {
+  const t = Date.parse(s)
+  return Number.isNaN(t) ? 0 : t
+}
+
 async function isAnsweredByMe(cfg: ThreadsCfg, replyId: string, myUsername: string): Promise<boolean> {
   const me = myUsername.toLowerCase()
   if (!me) return false
@@ -430,8 +448,11 @@ async function isAnsweredByMe(cfg: ThreadsCfg, replyId: string, myUsername: stri
 /**
  * All unanswered replies under your recent posts — including nested replies in
  * ongoing threads (not just the first top-level comment on each post).
+ * Long threads are capped at {@link MAX_UNANSWERED_REPLIES_PER_THREAD} (newest first).
  */
-async function fetchUnansweredPostReplies(cfg: ThreadsCfg): Promise<UnansweredReply[]> {
+async function fetchUnansweredPostReplies(
+  cfg: ThreadsCfg
+): Promise<{ replies: UnansweredReply[]; threadCap: ThreadReplyCapStats }> {
   const me = await apiGet<{ username?: string }>(cfg, '/me', { fields: 'id,username' })
   const myUsername = (typeof me.username === 'string' ? me.username : '').toLowerCase()
   // More posts so busy accounts still surface newer threads.
@@ -439,6 +460,9 @@ async function fetchUnansweredPostReplies(cfg: ThreadsCfg): Promise<UnansweredRe
   const out: UnansweredReply[] = []
   let probeBudget = ANSWER_PROBE_BUDGET
   const expandBudget = { left: REPLY_EXPAND_BUDGET }
+  let threadsTruncated = 0
+  let dropped = 0
+  const cap = MAX_UNANSWERED_REPLIES_PER_THREAD
 
   // Sequential on purpose: parallel conversation fetches trip Meta rate limits.
   for (const post of posts) {
@@ -462,6 +486,8 @@ async function fetchUnansweredPostReplies(cfg: ThreadsCfg): Promise<UnansweredRe
       }
     }
 
+    // Collect unanswered for THIS root post only, then hard-cap (deterministic).
+    const forPost: UnansweredReply[] = []
     for (const m of items) {
       if (typeof m.id !== 'string' || !m.id) continue
       // Skip the root post if it appears in the conversation list.
@@ -482,7 +508,7 @@ async function fetchUnansweredPostReplies(cfg: ThreadsCfg): Promise<UnansweredRe
         if (await isAnsweredByMe(cfg, m.id, myUsername)) continue
       }
 
-      out.push({
+      forPost.push({
         id: m.id,
         text,
         username: m.username!,
@@ -492,16 +518,28 @@ async function fetchUnansweredPostReplies(cfg: ThreadsCfg): Promise<UnansweredRe
         kind: 'reply',
       })
     }
+
+    // Newest first within the thread, then stop at 20 — never process the rest.
+    forPost.sort((a, b) => replyTimestamp(b.timestamp) - replyTimestamp(a.timestamp))
+    if (forPost.length > cap) {
+      threadsTruncated++
+      dropped += forPost.length - cap
+      out.push(...forPost.slice(0, cap))
+    } else {
+      out.push(...forPost)
+    }
   }
 
-  // Newest first so ongoing threads get attention before old leftovers.
-  const ts = (s: string): number => {
-    const t = Date.parse(s)
-    return Number.isNaN(t) ? 0 : t
+  // Newest first across posts so recent threads get attention first.
+  out.sort((a, b) => replyTimestamp(b.timestamp) - replyTimestamp(a.timestamp))
+  console.info(
+    `[threads] unanswered post-replies: ${out.length}` +
+      ` (per-thread cap ${cap}; truncated ${threadsTruncated} thread(s), dropped ${dropped})`
+  )
+  return {
+    replies: out,
+    threadCap: { maxPerThread: cap, threadsTruncated, dropped },
   }
-  out.sort((a, b) => ts(b.timestamp) - ts(a.timestamp))
-  console.info(`[threads] unanswered post-replies: ${out.length} (nested included)`)
-  return out
 }
 
 interface RawMention {
@@ -621,9 +659,13 @@ export async function fetchUnansweredReplies(
 export async function fetchUnansweredEngagement(
   cfg: ThreadsCfg,
   opts?: { includeMentions?: boolean }
-): Promise<{ replies: UnansweredReply[]; mentionError?: string }> {
+): Promise<{
+  replies: UnansweredReply[]
+  mentionError?: string
+  threadCap: ThreadReplyCapStats
+}> {
   const includeMentions = opts?.includeMentions !== false
-  const replies = await fetchUnansweredPostReplies(cfg)
+  const { replies, threadCap } = await fetchUnansweredPostReplies(cfg)
   let mentions: UnansweredReply[] = []
   let mentionError: string | undefined
   if (includeMentions) {
@@ -638,11 +680,7 @@ export async function fetchUnansweredEngagement(
     seen.add(item.id)
     out.push(item)
   }
-  const ts = (s: string): number => {
-    const t = Date.parse(s)
-    return Number.isNaN(t) ? 0 : t
-  }
-  out.sort((a, b) => ts(b.timestamp) - ts(a.timestamp))
+  out.sort((a, b) => replyTimestamp(b.timestamp) - replyTimestamp(a.timestamp))
   // Cap inbox size but keep room for nested replies across recent posts.
-  return { replies: out.slice(0, 100), mentionError }
+  return { replies: out.slice(0, 100), mentionError, threadCap }
 }

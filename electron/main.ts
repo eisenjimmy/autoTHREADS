@@ -141,7 +141,7 @@ app.whenReady().then(() => {
     }
     try {
       // Always include @mentions for the Replies page + Full-Auto.
-      const { replies, mentionError } = await fetchUnansweredEngagement(threads, {
+      const { replies, mentionError, threadCap } = await fetchUnansweredEngagement(threads, {
         includeMentions: true,
       })
       const mentionCount = replies.filter((r) => r.kind === 'mention').length
@@ -150,9 +150,22 @@ app.whenReady().then(() => {
       if (mentionError) message = mentionError
       else if (replies.length === 0) message = ''
       else message = `${replyCount} reply(ies), ${mentionCount} mention(s)`
-      return { ok: true, replies, message, mentionError: mentionError ?? null }
+      if (threadCap.threadsTruncated > 0) {
+        message = message
+          ? `${message}. Long threads capped at ${threadCap.maxPerThread} unanswered each ` +
+            `(${threadCap.threadsTruncated} thread(s), ${threadCap.dropped} skipped).`
+          : `Long threads capped at ${threadCap.maxPerThread} unanswered each ` +
+            `(${threadCap.threadsTruncated} thread(s), ${threadCap.dropped} skipped).`
+      }
+      return {
+        ok: true,
+        replies,
+        message,
+        mentionError: mentionError ?? null,
+        threadCap,
+      }
     } catch (err) {
-      return { ok: false, replies: [], message: errMsg(err), mentionError: null }
+      return { ok: false, replies: [], message: errMsg(err), mentionError: null, threadCap: null }
     }
   })
 
