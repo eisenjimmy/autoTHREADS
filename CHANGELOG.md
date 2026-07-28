@@ -9,6 +9,16 @@ Session-level notes also live under `_changelog/`.
 
 ---
 
+## [0.2.10] — 2026-07-28
+
+### Fixed / safety
+
+- **Long reply threads hard-capped at 20** unanswered per root post (newest first). Deterministic stop in `threadsApi` + Full-Auto so viral comment storms are never chased forever.
+- Activity log, Replies page banner, and Full-Auto settings copy explain the limit (EN/KO).
+- Max replies per Full-Auto run clamped to **20** (matches the per-thread hard cap).
+
+---
+
 ## [0.2.9] — 2026-07-28
 
 ### Added
