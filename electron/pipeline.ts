@@ -204,6 +204,33 @@ function cleanOutput(raw: string): string {
   return text
 }
 
+/**
+ * Append the news source URL to a post body when missing.
+ * Deterministic — do not rely on the model remembering the link.
+ * Truncates the body first so the full URL always fits within MAX_CHARS.
+ */
+export function withNewsSourceLink(text: string, url?: string | null): string {
+  const link = (url ?? '').trim()
+  if (!link || !/^https?:\/\//i.test(link)) return text
+  const body = text.trim()
+  if (!body) return link.slice(0, MAX_CHARS)
+  // Already present (full URL or trailing path match).
+  if (body.includes(link) || body.toLowerCase().includes(link.toLowerCase())) return body.slice(0, MAX_CHARS)
+  const suffix = `\n\n${link}`
+  const maxBody = MAX_CHARS - suffix.length
+  if (maxBody < 20) {
+    // Extremely long URL edge case — still prefer showing the link.
+    return link.slice(0, MAX_CHARS)
+  }
+  let head = body
+  if (head.length > maxBody) {
+    const cut = head.slice(0, maxBody - 1)
+    const atBoundary = cut.replace(/\s+\S*$/, '').trimEnd()
+    head = (atBoundary || cut).trimEnd() + '…'
+  }
+  return (head + suffix).slice(0, MAX_CHARS)
+}
+
 async function runGeneration(
   settings: AppSettings,
   userPrompt: string,
@@ -236,8 +263,15 @@ export async function generatePostDraft(input: {
   if (input.newsTitle) {
     const source = input.newsSource ? ` (${input.newsSource})` : ''
     user += ` React to this news headline: "${input.newsTitle}"${source}. Add one insightful angle or opinion, not a summary.`
+    if (input.newsUrl) {
+      user +=
+        ` The app will append the source link at the end — leave room (do not invent a different URL;` +
+        ` you may omit the link from your draft).`
+    }
   }
-  return runGeneration(settings, user)
+  const result = await runGeneration(settings, user)
+  if (!result.ok) return result
+  return { ...result, text: withNewsSourceLink(result.text, input.newsUrl) }
 }
 
 export async function generateReplyDraft(input: {
@@ -430,6 +464,8 @@ export interface AutopilotPostInput {
   angle?: string
   newsTitle?: string
   newsSource?: string
+  /** Source article URL — always appended to news posts when present. */
+  newsUrl?: string
   recent?: RecentPostMemory
   /** When true: invite followers, reference prior remarks, feel conversational. */
   interactive?: boolean
@@ -473,9 +509,14 @@ export async function generateAutopilotPost(input: AutopilotPostInput): Promise<
     parts.push(
       'This is ABOUT the news — a human take on something happening now. Not a recycled generic LLM remark. Not a summary dump.'
     )
+    if (input.newsUrl) {
+      parts.push(
+        'Do NOT invent a source URL. Leave room at the end — the app will append the real news link automatically.'
+      )
+    }
     if (interactive) {
       parts.push(
-        'End with a light hook for followers (question or "am I the only one…") when it fits. Stay under the character limit.'
+        'Include a light hook for followers (question or "am I the only one…") when it fits, before the source link space.'
       )
     }
   } else {
@@ -511,6 +552,10 @@ export async function generateAutopilotPost(input: AutopilotPostInput): Promise<
       buildPersonaPrompt(settings, 'post', niche)
     )
     if (retry.ok) result = retry
+  }
+  // News posts always carry the source URL in the body (deterministic append).
+  if (result.ok && hasReference && input.newsUrl) {
+    result = { ...result, text: withNewsSourceLink(result.text, input.newsUrl) }
   }
   return result
 }

@@ -428,6 +428,7 @@ async function runPostPhase(postsToday: number): Promise<number> {
       angle: item.angle,
       newsTitle: cand?.title,
       newsSource: cand?.source,
+      newsUrl: cand?.link,
       interactive: ap.liveNewsInteractive,
       recent: {
         ...recent,
