@@ -875,7 +875,7 @@ export default function AutopilotView() {
                         {t('open', '열기')}
                       </button>
                     )}
-                    <span className="ap-log-time">{timeAgo(e.at)}</span>
+                    <span className="ap-log-time">{timeAgo(e.at, settings.language)}</span>
                   </div>
                 ))
               )}

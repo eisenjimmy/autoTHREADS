@@ -1,16 +1,18 @@
 /** Tiny date/text helpers shared by the views. */
 
-export function timeAgo(ts: number | null | undefined): string {
+/** Relative time; pass `ko` for Korean UI (Settings language). */
+export function timeAgo(ts: number | null | undefined, lang?: string): string {
   if (!ts) return ''
+  const ko = lang === 'ko'
   const diff = Date.now() - ts
-  if (diff < 60_000) return 'just now'
+  if (diff < 60_000) return ko ? '방금' : 'just now'
   const mins = Math.floor(diff / 60_000)
-  if (mins < 60) return `${mins}m ago`
+  if (mins < 60) return ko ? `${mins}분 전` : `${mins}m ago`
   const hours = Math.floor(mins / 60)
-  if (hours < 24) return `${hours}h ago`
+  if (hours < 24) return ko ? `${hours}시간 전` : `${hours}h ago`
   const days = Math.floor(hours / 24)
-  if (days < 7) return `${days}d ago`
-  return new Date(ts).toLocaleDateString()
+  if (days < 7) return ko ? `${days}일 전` : `${days}d ago`
+  return new Date(ts).toLocaleDateString(ko ? 'ko-KR' : undefined)
 }
 
 export function fmtDateTime(ts: number | null | undefined): string {

@@ -96,6 +96,36 @@ const delay = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
 const dayKey = (): string => new Date().toLocaleDateString('en-CA') // YYYY-MM-DD (local)
 const isBusy = (): boolean => postBusy || replyBusy
 
+/** Activity-log copy follows app language (Settings → Language). */
+function tLog(en: string, ko: string): string {
+  return getSettings().language === 'ko' ? ko : en
+}
+
+/** Korean wrappers for known LLM-config error strings (English detail kept if unknown). */
+function localizeUnconfigured(en: string): string {
+  if (en.includes('Claude')) return 'Claude API 키가 없습니다 — 설정에서 구성하세요.'
+  if (en.includes('OpenAI')) return 'OpenAI API 키가 없습니다 — 설정에서 구성하세요.'
+  if (en.includes('Gemini')) return 'Gemini API 키가 없습니다 — 설정에서 구성하세요.'
+  if (en.includes('Local LLM')) return '로컬 LLM 기본 URL이 없습니다 — 설정에서 구성하세요.'
+  if (en.includes('Other provider')) return '기타 제공자 기본 URL이 없습니다 — 설정에서 구성하세요.'
+  return en
+}
+
+/** Mentions API failure (threadsApi) → Korean for the activity log. */
+function localizeMentionError(en: string): string {
+  if (/Mentions API failed/i.test(en)) {
+    const detail = en.replace(/^Mentions API failed:\s*/i, '').replace(
+      /\s*Regenerate your Threads token with the threads_manage_mentions permission\.?/i,
+      ''
+    )
+    return (
+      `멘션 API 실패: ${detail.trim()}. ` +
+      'threads_manage_mentions 권한이 있는 Threads 토큰을 다시 발급하세요.'
+    )
+  }
+  return en
+}
+
 function getInt(key: string): number {
   const v = db.get<number>(key)
   return typeof v === 'number' && Number.isFinite(v) ? v : 0
@@ -109,7 +139,12 @@ async function scheduleRetry(kind: 'post' | 'reply'): Promise<void> {
   // lastRun = now - interval + 1min  →  due again after 1 minute
   const stamp = Date.now() - intervalMin * 60_000 + RETRY_AFTER_MS
   await db.set(key, stamp)
-  log('info', `${kind === 'post' ? 'Post' : 'Reply'} failure — will retry in ~1 minute.`)
+  log(
+    'info',
+    kind === 'post'
+      ? tLog('Post failure — will retry in ~1 minute.', '게시 실패 — 약 1분 후 다시 시도합니다.')
+      : tLog('Reply failure — will retry in ~1 minute.', '답글 실패 — 약 1분 후 다시 시도합니다.')
+  )
 }
 
 /** Reset the per-day counters when the local date rolls over. */
@@ -280,7 +315,13 @@ async function runPostPhase(postsToday: number): Promise<number> {
   const remainingDay = ap.maxPostsPerDay - postsToday
   const budget = Math.min(ap.maxPostsPerRun, remainingDay)
   if (budget <= 0) {
-    log('skip', `Daily post budget reached (${postsToday}/${ap.maxPostsPerDay}).`)
+    log(
+      'skip',
+      tLog(
+        `Daily post budget reached (${postsToday}/${ap.maxPostsPerDay}).`,
+        `오늘 게시 한도에 도달했습니다 (${postsToday}/${ap.maxPostsPerDay}).`
+      )
+    )
     return 0
   }
 
@@ -288,7 +329,13 @@ async function runPostPhase(postsToday: number): Promise<number> {
   if (ap.sporadicPosts) {
     // ~45% chance to skip this post tick (still runs replies/mentions separately).
     if (Math.random() < 0.45) {
-      log('skip', 'Sporadic posts: sitting this one out (looks more human).')
+      log(
+        'skip',
+        tLog(
+          'Sporadic posts: sitting this one out (looks more human).',
+          '간헐 게시: 이번 회차는 건너뜁니다 (더 자연스럽게).'
+        )
+      )
       return 0
     }
   }
@@ -296,7 +343,13 @@ async function runPostPhase(postsToday: number): Promise<number> {
   // Know what she already posted — avoid repeating the same topic/angle.
   const recent = await collectRecentPostMemory(15)
   if (recent.texts.length > 0) {
-    log('info', `Loaded ${recent.texts.length} recent post(s) for anti-repeat memory.`)
+    log(
+      'info',
+      tLog(
+        `Loaded ${recent.texts.length} recent post(s) for anti-repeat memory.`,
+        `반복 방지를 위해 최근 게시 ${recent.texts.length}개를 불러왔습니다.`
+      )
+    )
   }
 
   const richRaw = await gatherCandidates()
@@ -318,14 +371,31 @@ async function runPostPhase(postsToday: number): Promise<number> {
     postsToday,
     recent,
   })
-  if (plan.reasoning) log('info', `Plan: ${plan.reasoning}${plan.usedFallback ? ' (fallback)' : ''}`)
+  if (plan.reasoning) {
+    const fallback = plan.usedFallback
+      ? tLog(' (fallback)', ' (대체 계획)')
+      : ''
+    log('info', tLog(`Plan: ${plan.reasoning}${fallback}`, `계획: ${plan.reasoning}${fallback}`))
+  }
   if (plan.items.length === 0) {
-    log('skip', 'Decided not to post this round (or nothing fresh vs recent posts).')
+    log(
+      'skip',
+      tLog(
+        'Decided not to post this round (or nothing fresh vs recent posts).',
+        '이번 회차는 게시하지 않기로 했습니다 (또는 최근 글과 겹치는 내용 없음).'
+      )
+    )
     return 0
   }
 
   if (ap.liveNewsInteractive) {
-    log('info', 'Live-news interactive on: prefer current headlines; occasional feelings posts.')
+    log(
+      'info',
+      tLog(
+        'Live-news interactive on: prefer current headlines; occasional feelings posts.',
+        '실시간 뉴스·인터랙티브 켜짐: 최신 헤드라인 우선, 가끔 감성·소통 글.'
+      )
+    )
   }
 
   let created = 0
@@ -340,7 +410,13 @@ async function runPostPhase(postsToday: number): Promise<number> {
     const genKind =
       item.kind === 'reflection' ? 'reflection' : cand ? 'news' : item.kind === 'original' ? 'original' : 'news'
     if (genKind === 'reflection') {
-      log('info', 'Planning a feelings / interactive follower post from recent posts + replies.')
+      log(
+        'info',
+        tLog(
+          'Planning a feelings / interactive follower post from recent posts + replies.',
+          '최근 게시·답글을 바탕으로 감성·팔로워 소통 글을 준비합니다.'
+        )
+      )
     }
     const gen = await generateAutopilotPost({
       kind: genKind,
@@ -356,11 +432,17 @@ async function runPostPhase(postsToday: number): Promise<number> {
       },
     })
     if (!gen.ok) {
-      log('error', `Post generation failed: ${gen.message}`)
+      log(
+        'error',
+        tLog(`Post generation failed: ${gen.message}`, `게시 생성 실패: ${gen.message}`)
+      )
       continue
     }
     if (sessionTexts.some((t) => postsTooSimilar(t, gen.text))) {
-      log('skip', 'Skipped a near-duplicate of a recent post.')
+      log(
+        'skip',
+        tLog('Skipped a near-duplicate of a recent post.', '최근 게시와 비슷한 글을 건너뛰었습니다.')
+      )
       continue
     }
     const now = Date.now()
@@ -385,14 +467,14 @@ async function runPostPhase(postsToday: number): Promise<number> {
       created++
       sessionTexts.unshift(gen.text)
       void db.set(AP_POSTS, postsToday + created)
-      log('post', `Drafted (review): ${preview}`)
+      log('post', tLog(`Drafted (review): ${preview}`, `초안 작성 (검토): ${preview}`))
     } else if (res.ok) {
       created++
       sessionTexts.unshift(gen.text)
       void db.set(AP_POSTS, postsToday + created)
-      log('post', `Posted: ${preview}`, res.permalink)
+      log('post', tLog(`Posted: ${preview}`, `게시됨: ${preview}`), res.permalink)
     } else {
-      log('error', `Publish failed: ${res.message}`)
+      log('error', tLog(`Publish failed: ${res.message}`, `게시 실패: ${res.message}`))
       await scheduleRetry('post')
     }
   }
@@ -429,12 +511,24 @@ async function runReplyPhase(repliesToday: number): Promise<number> {
   const settings = getSettings()
   const ap = settings.autopilot
   if (!ap.replyToAll && !ap.replyToMentions && !ap.engageDiscover) {
-    log('skip', 'Reply scanning is off (enable replies, @mentions, and/or discover).')
+    log(
+      'skip',
+      tLog(
+        'Reply scanning is off (enable replies, @mentions, and/or discover).',
+        '답글 스캔이 꺼져 있습니다 (답글, @멘션, 디스커버 중 하나 이상 켜세요).'
+      )
+    )
     return 0
   }
   const remainingDay = ap.maxRepliesPerDay - repliesToday
   if (remainingDay <= 0) {
-    log('skip', `Daily reply budget reached (${repliesToday}/${ap.maxRepliesPerDay}).`)
+    log(
+      'skip',
+      tLog(
+        `Daily reply budget reached (${repliesToday}/${ap.maxRepliesPerDay}).`,
+        `오늘 답글 한도에 도달했습니다 (${repliesToday}/${ap.maxRepliesPerDay}).`
+      )
+    )
     return 0
   }
 
@@ -444,16 +538,34 @@ async function runReplyPhase(repliesToday: number): Promise<number> {
 
   if (ap.replyToAll || ap.replyToMentions) {
     try {
-      log('info', `Scanning replies${ap.replyToMentions ? ' + @mentions' : ''}…`)
+      log(
+        'info',
+        ap.replyToMentions
+          ? tLog('Scanning replies + @mentions…', '답글 + @멘션 확인 중…')
+          : tLog('Scanning replies…', '답글 확인 중…')
+      )
       const fetched = await fetchUnansweredEngagement(settings.threads, {
         includeMentions: ap.replyToMentions,
       })
       if (fetched.mentionError) {
-        log('error', fetched.mentionError)
+        log(
+          'error',
+          tLog(
+            fetched.mentionError,
+            localizeMentionError(fetched.mentionError)
+          )
+        )
       }
       replies = fetched.replies
     } catch (err) {
-      log('error', `Could not fetch replies/mentions: ${err instanceof Error ? err.message : String(err)}`)
+      const detail = err instanceof Error ? err.message : String(err)
+      log(
+        'error',
+        tLog(
+          `Could not fetch replies/mentions: ${detail}`,
+          `답글/멘션을 가져오지 못했습니다: ${detail}`
+        )
+      )
       await scheduleRetry('reply')
       // Still try discover if enabled.
       if (ap.engageDiscover) {
@@ -469,7 +581,13 @@ async function runReplyPhase(repliesToday: number): Promise<number> {
     })
     const mentionN = replies.filter((r) => r.kind === 'mention').length
     const replyN = replies.length - mentionN
-    log('info', `Inbox: ${replyN} unanswered reply(ies), ${mentionN} @mention(s).`)
+    log(
+      'info',
+      tLog(
+        `Inbox: ${replyN} unanswered reply(ies), ${mentionN} @mention(s).`,
+        `받은편지함: 미답변 답글 ${replyN}개, @멘션 ${mentionN}개.`
+      )
+    )
   }
 
   const answered = new Set((db.get<string[]>(AP_ANSWERED) ?? []).filter((x) => typeof x === 'string'))
@@ -488,13 +606,19 @@ async function runReplyPhase(repliesToday: number): Promise<number> {
   const handle = ap.creatorHandle.trim().toLowerCase()
   const budget = Math.min(ap.maxRepliesPerRun, remainingDay)
 
-  log('info', `Found ${replies.length} candidate reply/mention(s).`)
+  log(
+    'info',
+    tLog(
+      `Found ${replies.length} candidate reply/mention(s).`,
+      `답글/멘션 후보 ${replies.length}개 발견.`
+    )
+  )
 
   for (const r of replies) {
     if (sent >= budget) break
     if (answered.has(r.id) || blockedIds.has(r.id)) continue
     const kind = r.kind === 'mention' ? 'mention' : 'reply'
-    const label = kind === 'mention' ? 'mention' : 'reply'
+    const isMention = kind === 'mention'
 
     // Retry an existing failed draft for this target instead of re-generating.
     const failedExisting = allDrafts().find(
@@ -508,10 +632,27 @@ async function runReplyPhase(repliesToday: number): Promise<number> {
         sent++
         void db.set(AP_REPLIES, repliesToday + sent)
         const fresh = allDrafts().find((d) => d.id === failedExisting.id)
-        log('reply', `Retried ${label} to @${r.username}.`, fresh?.permalink)
+        log(
+          'reply',
+          isMention
+            ? tLog(`Retried mention to @${r.username}.`, `@${r.username} 멘션 재시도 성공.`)
+            : tLog(`Retried reply to @${r.username}.`, `@${r.username} 답글 재시도 성공.`),
+          fresh?.permalink
+        )
       } else {
         failures++
-        log('error', `${label} retry failed (@${r.username}): ${res.message}`)
+        log(
+          'error',
+          isMention
+            ? tLog(
+                `mention retry failed (@${r.username}): ${res.message}`,
+                `멘션 재시도 실패 (@${r.username}): ${res.message}`
+              )
+            : tLog(
+                `reply retry failed (@${r.username}): ${res.message}`,
+                `답글 재시도 실패 (@${r.username}): ${res.message}`
+              )
+        )
       }
       await delay(800)
       continue
@@ -529,7 +670,18 @@ async function runReplyPhase(repliesToday: number): Promise<number> {
     })
     if (!gen.ok) {
       failures++
-      log('error', `${kind === 'mention' ? 'Mention' : 'Reply'} generation failed (@${r.username}): ${gen.message}`)
+      log(
+        'error',
+        isMention
+          ? tLog(
+              `Mention generation failed (@${r.username}): ${gen.message}`,
+              `멘션 생성 실패 (@${r.username}): ${gen.message}`
+            )
+          : tLog(
+              `Reply generation failed (@${r.username}): ${gen.message}`,
+              `답글 생성 실패 (@${r.username}): ${gen.message}`
+            )
+      )
       continue
     }
     const now = Date.now()
@@ -554,21 +706,48 @@ async function runReplyPhase(repliesToday: number): Promise<number> {
       void db.set(AP_ANSWERED, [...answered].slice(-1000))
       sent++
       void db.set(AP_REPLIES, repliesToday + sent)
-      log('reply', `Drafted ${label} to @${r.username} (review).`)
+      log(
+        'reply',
+        isMention
+          ? tLog(`Drafted mention to @${r.username} (review).`, `@${r.username} 멘션 초안 작성 (검토).`)
+          : tLog(`Drafted reply to @${r.username} (review).`, `@${r.username} 답글 초안 작성 (검토).`)
+      )
     } else if (res.ok) {
       answered.add(r.id)
       void db.set(AP_ANSWERED, [...answered].slice(-1000))
       sent++
       void db.set(AP_REPLIES, repliesToday + sent)
-      log('reply', `Replied to ${label} from @${r.username}.`, res.permalink)
+      log(
+        'reply',
+        isMention
+          ? tLog(`Replied to mention from @${r.username}.`, `@${r.username} 멘션에 답글함.`)
+          : tLog(`Replied to reply from @${r.username}.`, `@${r.username} 답글에 응답함.`),
+        res.permalink
+      )
     } else {
       // Keep target eligible for retry — do NOT add to answered.
       failures++
-      log('error', `${label} publish failed (@${r.username}): ${res.message}`)
+      log(
+        'error',
+        isMention
+          ? tLog(
+              `mention publish failed (@${r.username}): ${res.message}`,
+              `멘션 게시 실패 (@${r.username}): ${res.message}`
+            )
+          : tLog(
+              `reply publish failed (@${r.username}): ${res.message}`,
+              `답글 게시 실패 (@${r.username}): ${res.message}`
+            )
+      )
     }
     await delay(800)
   }
-  if (sent === 0 && failures === 0) log('info', 'No new replies or mentions to answer.')
+  if (sent === 0 && failures === 0) {
+    log(
+      'info',
+      tLog('No new replies or mentions to answer.', '답할 새 답글이나 멘션이 없습니다.')
+    )
+  }
   if (failures > 0) await scheduleRetry('reply')
 
   // Optional: join random public threads in your niches (keyword search).
@@ -595,7 +774,10 @@ async function runDiscoverPhase(repliesTodaySoFar: number): Promise<number> {
   const remainingGlobal = ap.maxRepliesPerDay - repliesTodaySoFar
   const budget = Math.min(ap.maxDiscoverRepliesPerRun, remainingDiscover, remainingGlobal)
   if (budget <= 0) {
-    log('skip', 'Discover reply budget reached for today.')
+    log(
+      'skip',
+      tLog('Discover reply budget reached for today.', '오늘 디스커버 답글 한도에 도달했습니다.')
+    )
     return 0
   }
 
@@ -616,7 +798,13 @@ async function runDiscoverPhase(repliesTodaySoFar: number): Promise<number> {
     const keyword = q.split(/\s+/).slice(0, 3).join(' ')
     const res = await searchKeywordPosts(settings.threads, keyword, 12)
     if (!res.ok) {
-      log('error', `Discover search "${keyword}": ${res.message}`)
+      log(
+        'error',
+        tLog(
+          `Discover search "${keyword}": ${res.message}`,
+          `디스커버 검색 "${keyword}": ${res.message}`
+        )
+      )
       continue
     }
     for (const p of res.posts) {
@@ -627,13 +815,25 @@ async function runDiscoverPhase(repliesTodaySoFar: number): Promise<number> {
   }
 
   if (candidates.length === 0) {
-    log('info', 'Discover: no fresh public posts found for this tick.')
+    log(
+      'info',
+      tLog(
+        'Discover: no fresh public posts found for this tick.',
+        '디스커버: 이번 회차에 새 공개 글을 찾지 못했습니다.'
+      )
+    )
     return 0
   }
 
   // Random sample.
   const picks = [...candidates].sort(() => Math.random() - 0.5).slice(0, budget)
-  log('info', `Discover: engaging ${picks.length} public post(s) in niches [${shuffled.join(', ')}].`)
+  log(
+    'info',
+    tLog(
+      `Discover: engaging ${picks.length} public post(s) in niches [${shuffled.join(', ')}].`,
+      `디스커버: 분야 [${shuffled.join(', ')}]에서 공개 글 ${picks.length}개에 참여합니다.`
+    )
+  )
 
   let sent = 0
   let failures = 0
@@ -647,7 +847,13 @@ async function runDiscoverPhase(repliesTodaySoFar: number): Promise<number> {
     })
     if (!gen.ok) {
       failures++
-      log('error', `Discover reply gen failed (@${p.username}): ${gen.message}`)
+      log(
+        'error',
+        tLog(
+          `Discover reply gen failed (@${p.username}): ${gen.message}`,
+          `디스커버 답글 생성 실패 (@${p.username}): ${gen.message}`
+        )
+      )
       continue
     }
     const now = Date.now()
@@ -670,13 +876,29 @@ async function runDiscoverPhase(repliesTodaySoFar: number): Promise<number> {
 
     if (!publish) {
       sent++
-      log('reply', `Drafted discover reply to @${p.username}.`)
+      log(
+        'reply',
+        tLog(
+          `Drafted discover reply to @${p.username}.`,
+          `@${p.username} 디스커버 답글 초안 작성.`
+        )
+      )
     } else if (res.ok) {
       sent++
-      log('reply', `Discover replied to @${p.username}.`, res.permalink)
+      log(
+        'reply',
+        tLog(`Discover replied to @${p.username}.`, `@${p.username} 디스커버 답글 게시.`),
+        res.permalink
+      )
     } else {
       failures++
-      log('error', `Discover publish failed (@${p.username}): ${res.message}`)
+      log(
+        'error',
+        tLog(
+          `Discover publish failed (@${p.username}): ${res.message}`,
+          `디스커버 게시 실패 (@${p.username}): ${res.message}`
+        )
+      )
     }
     await delay(1000)
   }
@@ -705,20 +927,38 @@ async function runAutopilotPass(
     const settings = getSettings()
     const missing = unconfiguredMessage(settings.llm)
     if (missing) {
-      log('error', missing)
+      log('error', tLog(missing, localizeUnconfigured(missing)))
       return
     }
     if (!settings.threads.accessToken) {
-      log('error', 'Threads API is not configured — add an access token in Settings.')
+      log(
+        'error',
+        tLog(
+          'Threads API is not configured — add an access token in Settings.',
+          'Threads API가 설정되지 않았습니다 — 설정에서 액세스 토큰을 추가하세요.'
+        )
+      )
       return
     }
     const { posts, replies } = rolloverDaily()
-    const parts: string[] = []
-    if (phases.posts) parts.push('posts')
-    if (phases.replies) parts.push('replies/mentions')
+    const partsEn: string[] = []
+    const partsKo: string[] = []
+    if (phases.posts) {
+      partsEn.push('posts')
+      partsKo.push('게시')
+    }
+    if (phases.replies) {
+      partsEn.push('replies/mentions')
+      partsKo.push('답글/멘션')
+    }
+    const reasonEn = reason === 'manual' ? 'manual' : 'scheduled'
+    const reasonKo = reason === 'manual' ? '수동' : '예약'
     log(
       'info',
-      `${parts.join(' + ')} (${reason}) — ${posts}/${settings.autopilot.maxPostsPerDay} posts, ${replies}/${settings.autopilot.maxRepliesPerDay} replies today.`
+      tLog(
+        `${partsEn.join(' + ')} (${reasonEn}) — ${posts}/${settings.autopilot.maxPostsPerDay} posts, ${replies}/${settings.autopilot.maxRepliesPerDay} replies today.`,
+        `${partsKo.join(' + ')} (${reasonKo}) — 오늘 게시 ${posts}/${settings.autopilot.maxPostsPerDay}, 답글 ${replies}/${settings.autopilot.maxRepliesPerDay}.`
+      )
     )
     const now = Date.now()
     // Run phases (possibly both). Stamp each timer when that phase starts.
@@ -741,7 +981,11 @@ async function runAutopilotPass(
     }
     await Promise.all(jobs)
   } catch (err) {
-    log('error', `Autopilot pass failed: ${err instanceof Error ? err.message : String(err)}`)
+    const detail = err instanceof Error ? err.message : String(err)
+    log(
+      'error',
+      tLog(`Autopilot pass failed: ${detail}`, `자동 실행 실패: ${detail}`)
+    )
     if (phases.replies) await scheduleRetry('reply')
     if (phases.posts) await scheduleRetry('post')
   } finally {
