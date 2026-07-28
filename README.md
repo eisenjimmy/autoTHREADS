@@ -33,10 +33,10 @@ control, or hand the wheel to a self-running agent that posts and replies on its
 ---
 
 > [!TIP]
-> **New in v0.2.0 — Full-Auto mode.** An opt-in autonomous agent that decides whether and what to
-> post, writes modern human-sounding Threads posts across your niches, and replies in context —
-> under hard daily caps so it never spams. See [Full-Auto](#-full-auto-mode) and
-> [CHANGELOG.md](CHANGELOG.md).
+> **Current release: v0.2.8.** Full-Auto now includes **live news + interactive voice**, dual
+> post/reply timers, @mentions, nested thread replies, sporadic posting, optional discover
+> engagement, anti-repeat memory, and **Settings fully bilingual EN/한국어**. See
+> [Full-Auto](#-full-auto-mode) and [CHANGELOG.md](CHANGELOG.md).
 
 ## Contents
 
@@ -64,16 +64,18 @@ AutoThreads is a desktop app that turns news, replies, and ideas into Threads co
 
 - **Assisted mode** — *AI writes drafts, you decide what posts.* Find news, generate a Thread-ready
   draft, attach an optional image, and schedule it. You review everything before it goes live.
-- **Full-Auto mode** — *the agent runs itself.* On an interval it scrapes news, decides what's worth
-  posting, writes it, and answers replies — hands-off, with hard safety caps.
+- **Full-Auto mode** — *the agent runs itself.* On separate post and reply timers it scrapes
+  **current news**, decides what's worth posting (with anti-repeat memory), writes it, answers
+  replies **and @mentions**, and can optionally join public threads in your niches — hands-off,
+  with hard safety caps.
 
 Built for a creator workflow where you want leverage, not chaos:
 
-- 🔎 Find news around topics you care about.
+- 🔎 Find **current** news around topics you care about.
 - 🧠 Let AI turn it into a Thread-ready draft — or run the whole loop for you.
 - 🖼️ Pull a related public image from the web.
 - 🗣️ Teach it your writing voice.
-- 💬 Draft or auto-send replies.
+- 💬 Draft or auto-send replies, **@mentions**, and nested thread comments.
 - ⏰ Schedule posts for later.
 - 💸 Use a local LLM for **$0 cloud API cost**, or bring Claude, ChatGPT, Gemini, or any OpenAI-compatible endpoint.
 
@@ -87,17 +89,17 @@ Built for a creator workflow where you want leverage, not chaos:
 
 Most of AutoThreads is deliberately *"AI drafts, you decide."* **Full-Auto** is the opt-in exception:
 a self-running agent for a hands-off Threads presence. Open the **Auto** tab, configure it, and press
-**Launch** — then it thinks on its own every interval.
+**Launch** — posts and replies run on **independent timers**.
 
-### Loop
+### Dual loop
 
 ```text
-every N minutes
-  ├─ scrape news     Google · Yahoo · Naver · Hacker News · custom RSS/Atom
-  ├─ LLM decides     post? how many? news vs original?   (respects daily caps)
-  ├─ write posts     casual, human, engagement-first voice
-  ├─ scan replies    answer unanswered replies in context (can read linked pages)
-  └─ log activity    then sleep until the next tick
+POST TIMER (default 60 min)          REPLY TIMER (default 5 min)
+  ├─ scrape CURRENT news               ├─ unanswered replies (incl. nested)
+  ├─ plan (news-first if enabled)      ├─ @mentions of you
+  ├─ anti-repeat vs recent posts       ├─ optional discover (public niches)
+  ├─ write · publish / draft           ├─ generate · publish / draft
+  └─ log                               └─ failures retry ~1 min
 ```
 
 ### What you configure
@@ -108,54 +110,90 @@ every N minutes
 | **Topics / niches** | Popular Threads niches first (**AI**, tech, startups, productivity, humor…) plus more categories and custom multi-select. Posts use that niche’s native voice. |
 | **Post language** | Match the source, Korean only, English only, or follow the app language. |
 | **Personality** | Agent name, creator, creator `@handle`, address term (e.g. "Master"), and tone notes. |
-| **Cadence & caps** | Think-interval, max posts per run, **max posts per day**, original-vs-news mix. |
-| **Replies & mentions** | Auto-reply vs draft for replies on your posts **and** @mentions of you, with per-run and per-day caps. Mentions need `threads_manage_mentions`. |
-| **Publishing** | **Live** to Threads, or **draft-only** as a safety valve. |
+| **Post timer** | How often the agent plans/posts (default **60 min**). |
+| **Reply / mention timer** | How often it scans replies + mentions (default **5 min**). Separate from the post timer. |
+| **Original vs news** | Mix of original riffs vs news reactions (live-news mode caps originals so news stays primary). |
+| **Post here and there (sporadic)** | Randomly skips some post ticks so publishing doesn’t look like a metronome. |
+| **Live news + interactive voice** | News-first from scrapers; occasional “feelings” posts from last 3 posts + replies; follower callbacks. Hover **(?)** in-app for the full tip. |
+| **Replies on my posts** | Answer unanswered comments, including **nested** replies in ongoing threads. |
+| **@mentions of me** | Answer public posts that @mention you (`threads_manage_mentions` on the **token**). |
+| **Discover (public niches)** | Opt-in: reply to random public posts via keyword search (`threads_keyword_search`; public results need advanced access). |
+| **Publishing** | **Live** to Threads, or **draft-only** as a safety valve. Auto-publish replies can be separate. |
 
 ### Controls
 
 | Control | Behavior |
 | --- | --- |
-| **Save** | Persist Full-Auto settings (persona, caps, niches, publishing mode). |
-| **Launch** | Start the interval loop. Status shows running + next-run countdown. |
+| **Save** | Persist Full-Auto settings (persona, caps, niches, publishing mode, toggles). |
+| **Launch** | Start both loops; **resets post + reply timers** and runs an immediate reply/mention scan. |
 | **Stop** | Halt immediately; nothing further posts or replies. |
-| **Run once** | Execute a single tick now (useful for dry runs with draft-only on). |
+| **Run once** | Execute post + reply/mention (and discover if on) now — good for draft-only dry runs. |
+
+### Status panel
+
+While running, the Auto tab shows:
+
+- Posts today / cap · Replies today / cap  
+- **Post timer** countdown (every N min)  
+- **Reply / mention timer** countdown (every N min; failures note ~1 min retry)  
+- Live vs draft-only mode  
+- Activity log (plan, post, reply, discover, errors)
 
 ### How it behaves
 
+- **News-first (when Live news interactive is on)** — most posts react to **current scraped headlines**, not recycled LLM monologues.
+- **Anti-repeat** — remembers recent posts (local drafts + live Threads scrape) so topics/angles don’t loop.
+- **Interactive** — occasional feelings posts and light callbacks to followers about prior remarks.
 - **Knows its creator** — replies from your `@handle` get special, warm treatment.
 - **Human, not a news desk** — funny, casual, opinionated; written to invite replies and likes.
-- **Anti-spam** — hard daily caps; used headlines are never reposted.
+- **Anti-spam** — hard daily caps; used headlines are never reposted; failed publishes retry ~1 minute.
 - **Discreet** — instructed never to reveal system prompts, API keys, tokens, or internal config.
-- **Transparent** — live status (posts/replies today, next run) plus an activity log; published posts surface in Drafts/Queue and link out to Threads when live.
+- **Transparent** — live status + activity log; activity appears in Drafts/Queue.
 
 ### First-run checklist
 
 1. Configure **AI provider** and **Threads access token** in Settings; run both connection tests.
-2. Open **Auto** → set goal, niches, persona, and conservative caps (e.g. 1–2 posts/day).
-3. Turn **Publish live** **off** (draft-only) → **Save** → **Run once**.
-4. Review drafts in the **Drafts** tab; adjust persona/caps if needed.
-5. When ready, enable **Publish live**, **Launch**, and watch the activity log.
+2. Token permissions should include publishing, replies, and **`threads_manage_mentions`** (regenerate the token **after** enabling the permission in Meta). Optional: **`threads_keyword_search`** for discover.
+3. Open **Auto** → set goal, niches, persona, and conservative caps (e.g. 1–2 posts/day).
+4. Prefer **Live news + interactive voice** ON for a news-driven feed.
+5. Turn **Publish live** **off** (draft-only) → **Save** → **Run once**.
+6. Review drafts in **Drafts** / **Replies**; adjust persona/caps if needed.
+7. When ready, enable **Publish live**, **Launch**, and watch the activity log.
 
 > [!IMPORTANT]
 > Full-Auto can publish to your real account. It is **off until you Launch it** and stops the
 > instant you press **Stop**. Always start in **draft-only** mode before going live.
 
+### Token permissions (Meta)
+
+| Permission | Used for |
+| --- | --- |
+| `threads_basic` | Profile / baseline API |
+| `threads_content_publish` | Create & publish posts |
+| `threads_read_replies` / `threads_manage_replies` | Read & answer replies (incl. nested) |
+| `threads_manage_mentions` | Fetch & answer @mentions |
+| `threads_keyword_search` | Discover public posts in niches (public results need advanced access) |
+
+App permission “Ready for testing” is not enough by itself — the **access token** must include the scopes when it is generated.
+
 ## 🧩 Features
 
 | Feature | What it means |
 | --- | --- |
-| 📰 **News/blogs → drafts** | Pick topics or presets (science, fashion, lifestyle, finance, travel, food…). Sources: Google News RSS, Yahoo News, selective Hacker News, Naver News, and custom RSS/Atom feeds. |
-| 🤖 **Full-Auto agent** | Autonomous decide → post → reply loop across your niches, with daily caps. Off by default; you Launch it. |
-| 💻 **Local LLM support** | Run with Jarvis, Ollama, LM Studio, llama.cpp, or any OpenAI-compatible local server for **$0 API cost**. |
-| ☁️ **Cloud model support** | Use Claude, ChatGPT/OpenAI, Gemini, or a custom OpenAI-compatible provider. |
-| 🖼️ **Image assist** | AI suggests keywords, AutoThreads searches Wikimedia Commons, and you choose an optional public image. |
-| 🗣️ **Your writing style** | Add style notes, paste sample posts, or import recent Threads posts to teach it your voice. |
-| 💬 **Reply drafts** | Pull unanswered replies and generate response drafts (or let Full-Auto send them). |
-| ⏰ **Scheduler** | Schedule approved drafts. Scheduled posts publish automatically while the app is open. |
-| 🔑 **Token-first Threads setup** | Paste a Threads access token. OAuth app credentials are optional advanced setup. |
-| 🛡️ **Private by design** | Secrets are encrypted with the OS keychain. The renderer gets no direct filesystem/network access. |
-| 🌍 **Localized UI** | EN, ES, KO, ZH, JA, FR, DE, PT for core workflows; Full-Auto is fully bilingual EN/한국어. |
+| 📰 **News/blogs → drafts** | Topics or presets (science, fashion, finance…). Sources: Google News RSS, Yahoo News, selective Hacker News, Naver News, custom RSS/Atom. |
+| 🤖 **Full-Auto agent** | Dual timers: post planning + reply/mention/discover loops, daily caps, activity log. Off until Launch. |
+| 🗞️ **Live news interactive** | News-first generation, feelings posts, follower callbacks, anti-repeat memory. |
+| 💬 **Replies + @mentions** | Replies page: All / Replies / @Mentions filters. Nested thread replies included. |
+| 🌐 **Discover engagement** | Opt-in keyword-search replies on public posts in your niches. |
+| 🎲 **Sporadic posts** | Randomly skip post ticks for a more human cadence. |
+| 💻 **Local LLM** | Jarvis, Ollama, LM Studio, llama.cpp, or any OpenAI-compatible local server — **$0 API cost**. |
+| ☁️ **Cloud models** | Claude, ChatGPT/OpenAI, Gemini, or custom OpenAI-compatible provider. |
+| 🖼️ **Image assist** | AI keywords → Wikimedia Commons → you choose. |
+| 🗣️ **Writing style** | Style notes, samples, import recent Threads posts. |
+| ⏰ **Scheduler** | Schedule drafts; due posts publish while the app is open. Failed drafts retry ~1 min. |
+| 🔑 **Token-first Threads** | Paste access token; OAuth fields optional. |
+| 🛡️ **Private by design** | Secrets encrypted via OS keychain; renderer has no raw FS/network. |
+| 🌍 **Localized UI** | Core shell: EN, ES, KO, ZH, JA, FR, DE, PT. **Settings + Full-Auto fully bilingual EN/한국어.** |
 
 ## 📸 Screenshots
 
@@ -203,6 +241,10 @@ npm run package:win    # Windows
 npm run package:all    # both
 ```
 
+Prebuilt macOS DMGs/zips: [GitHub Releases](https://github.com/eisenjimmy/autoTHREADS/releases) (latest **v0.2.8**).
+
+> Apps are not notarized yet. On first open: right-click → **Open** (or allow under Privacy & Security).
+
 </details>
 
 ## 🤖 Configure AI
@@ -240,7 +282,7 @@ Supported providers: **Claude · ChatGPT/OpenAI · Gemini · Other** (any OpenAI
 
 <img src="docs/assets/threads-setup-guide.png" alt="Threads setup guide" width="100%" />
 
-Publishing and reply management use the official Threads API. The easiest desktop workflow is token-first.
+Publishing, replies, mentions, and optional discover use the official Threads API. The easiest desktop workflow is token-first.
 
 <details>
 <summary><b>Step-by-step token setup</b></summary>
@@ -252,8 +294,8 @@ Publishing and reply management use the official Threads API. The easiest deskto
 3. In the Threads API settings, click **Add or Remove Threads Testers**.
 4. Add your Threads account.
 5. Accept the tester invite in Threads if Meta asks.
-6. Return to **User Token Generator**.
-7. Generate a token.
+6. Enable needed permissions (publish, replies, **mentions**, optional **keyword search**).
+7. Return to **User Token Generator** and generate a token **after** those permissions are on.
 8. Open AutoThreads → **Settings → Threads API**.
 9. Paste the token into **Access token**.
 10. Leave **User ID** blank unless the test tells you otherwise.
@@ -272,24 +314,25 @@ Secret, or Redirect URI once they have a usable token.
 2. Open **News** and choose a headline → **Generate draft**.
 3. Edit the draft, **Suggest images**, and choose an optional image.
 4. Post now, schedule it, or delete it.
-5. Use **Replies** to draft responses; use **Writing style** to keep drafts sounding like you.
+5. Use **Replies** (All / Replies / @Mentions) to draft responses; use **Writing style** for voice.
 
 **Hands-off:**
 
-1. Open the **Auto** tab and set your goal, niches, persona, and caps.
-2. Press **Launch Full-Auto** (or start in draft-only to preview).
-3. Watch the activity log — the agent posts and replies on its own.
+1. Open the **Auto** tab — goal, niches, persona, dual timers, live-news / sporadic / discover toggles.
+2. Prefer draft-only first → **Save** → **Run once** or **Launch Full-Auto**.
+3. Watch the activity log — posts, nested replies, @mentions, optional discover replies.
 
 ## 🏗️ Architecture
 
 ```text
 News sources ─┐
               ├─> LLM provider ─> Draft ─> Review ─> Post now / Schedule ─> Threads API
-Replies API ──┘        │                         │
-                       │                         └─> Optional public image
-                       └─> Your style notes + samples
-
-Full-Auto ▸ decide (LLM) ─> generate ─> publish/draft ─> reply ─> log   (own interval + daily caps)
+Replies API ──┤        │                         │
+Mentions API ─┤        │                         └─> Optional public image
+Keyword search┤        └─> Style + recent-post memory (anti-repeat / interactive)
+              │
+Full-Auto post timer  ▸ scrape · plan · generate · publish/draft · log
+Full-Auto reply timer ▸ replies · @mentions · discover · retry failures
 ```
 
 <details>
@@ -318,7 +361,7 @@ with Electron `safeStorage` (Keychain on macOS, DPAPI on Windows).
 | Build | Vite |
 | Packaging | electron-builder |
 | Storage | Dependency-free local JSON |
-| APIs | Threads Graph API, Google News RSS, Yahoo News, Hacker News Algolia API, Naver News, RSS/Atom feeds, Wikimedia Commons |
+| APIs | Threads Graph API (publish, replies, conversation, mentions, keyword search), Google News RSS, Yahoo News, Hacker News Algolia API, Naver News, RSS/Atom feeds, Wikimedia Commons |
 
 ## 📁 Project Layout
 
@@ -326,32 +369,34 @@ with Electron `safeStorage` (Keychain on macOS, DPAPI on Windows).
 electron/          Main process
   main.ts          App window, IPC handlers, security hardening
   llm.ts           Claude / OpenAI / Gemini / Local / Other adapters
-  threadsApi.ts    Threads Graph API client
+  threadsApi.ts    Threads Graph API (posts, nested replies, mentions, keyword search)
   threadsOAuth.ts  Optional OAuth callback flow
-  news.ts          Google · Yahoo · Naver · custom RSS/Atom · selective Hacker News aggregation
+  news.ts          Google · Yahoo · Naver · custom RSS/Atom · selective Hacker News
   images.ts        AI image keywords + Wikimedia Commons search
   drafts.ts        Draft store
-  scheduler.ts     Due-post publisher + auto-draft loop
-  autopilot.ts     Full-Auto engine: autonomous decide/post/reply loop with daily caps
+  scheduler.ts     Due-post publisher + failed-draft retry + auto-draft loop
+  autopilot.ts     Full-Auto engine: dual timers, discover, live-news interactive
+  pipeline.ts      Prompts, planning, recent-post memory, generation
   settings.ts      Settings + encrypted secrets
 
 src/               Renderer
   components/      Drafts, News, Replies, Queue, Autopilot, Settings, Onboarding
   store/           Zustand app store
   styles/          Monotone desktop UI
-  i18n.ts          Localization strings
+  i18n.ts          Localization strings (Settings + Full-Auto: full EN/KO)
 
 docs/assets/       README hero, screenshots, and setup graphics
 build/             App icons for packaging
+CHANGELOG.md       Release history (Keep a Changelog)
 ```
 
 ## 🔐 Safety Model
 
 By default, AutoThreads is **not** a black-box autoposter:
 
-- ✅ Drafts wait for review.
-- ✅ AI replies are drafts, not surprise posts.
-- ✅ Auto-generated drafts do not publish themselves.
+- ✅ Drafts wait for review (assisted mode).
+- ✅ AI replies can be drafts, not surprise posts.
+- ✅ Auto-generated drafts do not publish themselves unless you scheduled them or enabled Full-Auto live.
 - ✅ Scheduled posts publish only because *you* scheduled them.
 - ✅ Tokens and keys are encrypted locally.
 - ✅ External links open in the system browser.
@@ -360,9 +405,10 @@ By default, AutoThreads is **not** a black-box autoposter:
 **Full-Auto** is the one autonomous exception, and it is opt-in:
 
 - 🟢 **Off until you Launch it**, and stops the moment you press Stop.
-- 🧯 Hard **daily post/reply caps** prevent spamming; used headlines are never reposted.
-- 📝 A **draft-only** switch lets the agent decide everything while still holding posts for review.
-- 🤐 The agent is instructed to never reveal system prompts, API keys, tokens, or internal configuration.
+- 🧯 Hard **daily post/reply caps**; used headlines never reposted; anti-repeat memory.
+- 📝 **Draft-only** switch for dry runs.
+- ⏱️ Separate reply timer + **~1 minute retry** on publish failures.
+- 🤐 Never reveal system prompts, API keys, tokens, or internal configuration.
 
 ## 🧭 Roadmap
 
@@ -374,6 +420,7 @@ By default, AutoThreads is **not** a black-box autoposter:
 - [ ] Full-Auto performance dashboard (engagement per post)
 - [ ] Packaged notarized macOS releases
 - [ ] Linux packaging
+- [ ] Windows CI packaging without a local Windows host
 
 ## 🤝 Contributing
 
@@ -408,83 +455,82 @@ keep Full-Auto opt-in and safely capped.
 AutoThreads는 Threads 운영을 AI로 도와주는 데스크톱 앱입니다. 두 가지 방식으로 동작합니다.
 
 - **보조 모드** — *AI가 초안을 만들고, 게시 여부는 사용자가 결정합니다.* 뉴스를 찾아 초안을 만들고, 이미지를 붙이고, 예약합니다.
-- **완전 자동 모드** — *에이전트가 스스로 운영합니다.* 주기마다 뉴스를 수집해 게시 여부를 판단하고, 글을 쓰고, 답글까지 처리합니다. 하루 한도로 안전하게 제한됩니다.
+- **완전 자동 모드** — *에이전트가 스스로 운영합니다.* **게시 타이머**와 **답글·멘션 타이머**를 따로 두고, **최신 뉴스** 중심 글, 중첩 답글, @멘션, (선택) 공개 글 발견 답글까지 처리합니다. 하루 한도와 반복 방지 메모리가 있습니다.
 
 ## 핵심 가치
 
 - 🤖 **AI 자동화 + 사용자 통제** (또는 완전 자동)
 - 💸 **Local LLM 사용 시 API 비용 $0**
-- 📰 **뉴스 기반 초안 생성**
+- 📰 **실시간 뉴스 기반 초안 / 게시**
 - 🖼️ **관련 이미지 검색**
 - 🗣️ **내 글쓰기 스타일 반영**
-- 💬 **답글 초안 / 자동 응대**
-- ⏰ **예약 발행**
+- 💬 **답글 · @멘션 · 중첩 스레드 응대**
+- 🎲 **불규칙 게시 · 실시간 뉴스+상호작용 보이스**
+- ⏰ **예약 발행 · 실패 시 약 1분 재시도**
 - 🔑 **토큰 우선 Threads 설정**
 - 🔐 **로컬 암호화 저장**
+- 🌍 **설정 · Full-Auto UI 영어/한국어 완전 지원**
 
 ## 🚀 완전 자동 (Full-Auto)
 
-AutoThreads의 기본 철학은 "AI가 초안을 만들고 사용자가 결정한다"입니다. **완전 자동(Full-Auto)** 은
-이를 선택적으로 해제하는 모드로, 손이 거의 필요 없는 Threads 운영을 위한 기능입니다.
-**Auto(자동)** 탭에서 설정하고 **완전 자동 시작**을 누르면 주기마다 스스로 판단합니다.
+**Auto(자동)** 탭에서 설정하고 **완전 자동 시작**을 누르면 동작합니다. **기본은 꺼져 있습니다.**
 
-### 루프
+### 이중 루프
 
 ```text
-N분마다
-  ├─ 뉴스 수집    Google · Yahoo · Naver · Hacker News · 커스텀 RSS/Atom
-  ├─ LLM 판단     게시할까? 몇 개? 뉴스 vs 오리지널   (하루 한도 준수)
-  ├─ 글 작성      사람 같고 캐주얼하게, 참여 유도
-  ├─ 답글 처리    미답변 답글에 문맥 맞춰 응대 (링크된 페이지도 읽음)
-  └─ 활동 기록    다음 주기까지 대기
+게시 타이머 (기본 60분)              답글 타이머 (기본 5분)
+  ├─ 최신 뉴스 스크랩                   ├─ 미답변 답글 (중첩 포함)
+  ├─ 계획 (뉴스 우선 옵션)              ├─ @멘션
+  ├─ 최근 글 기억 · 반복 방지           ├─ (선택) 분야 공개 글 발견 답글
+  ├─ 작성 · 게시/초안                   └─ 실패 시 ~1분 재시도
+  └─ 활동 로그
 ```
 
-### 설정 항목
+### 주요 토글
 
-| 설정 | 설명 |
+| 토글 | 설명 |
 | --- | --- |
-| **목표** | 팔로워·댓글·좋아요 등 에이전트가 최적화할 목표. 모든 판단의 기준. |
-| **주제 / 분야** | Threads 인기 분야 우선 (**AI**, 기술, 스타트업, 생산성, 유머…) + 기타 프리셋·직접 추가. 선택한 분야 톤으로 작성. |
-| **게시 언어** | 원문 언어 따르기 / 한국어만 / 영어만 / 앱 언어 따르기. |
-| **페르소나** | 에이전트 이름, 제작자, 제작자 `@핸들`, 호칭(예: "Master"), 톤 메모. |
-| **주기 & 한도** | 실행 주기, 실행당 최대 게시, **하루 최대 게시**, 오리지널 vs 뉴스 비율. |
-| **답글** | 자동 응대 vs 초안 작성, 실행당·하루 한도. |
-| **게시 방식** | Threads **실시간 게시** 또는 안전장치 **초안 전용**. |
+| **여기저기 게시 (불규칙)** | 게시 틱을 가끔 건너뛰어 시계처럼 올리지 않음 |
+| **실시간 뉴스 + 상호작용 보이스** | 스크랩 뉴스 위주 · 가끔 최근 3개 글·답글 기반 감정 글 · 팔로워에게 이전 발언 언급. 앱의 **(?)** 툴팁 참고 |
+| **내 게시물 답글 응대** | 진행 중인 스레드의 **중첩 답글** 포함 |
+| **@멘션 응대** | `threads_manage_mentions`가 **토큰**에 포함되어야 함 (권한만 켠 뒤 토큰 재발급) |
+| **분야 공개 글 랜덤 답글** | 키워드 검색 (`threads_keyword_search`). 공개 검색은 고급 액세스/앱 리뷰 필요할 수 있음 |
 
 ### 조작
 
 | 버튼 | 동작 |
 | --- | --- |
-| **저장** | Full-Auto 설정(페르소나·한도·분야·게시 방식)을 저장합니다. |
-| **시작** | 주기 루프를 시작합니다. 상태 패널에 실행 중·다음 실행 시각이 표시됩니다. |
-| **중지** | 즉시 중단합니다. 이후 게시·답글이 나가지 않습니다. |
-| **한 번 실행** | 지금 1회만 돌립니다 (초안 전용 dry-run에 유용). |
+| **저장** | 설정 저장 |
+| **시작** | 게시·답글 타이머 모두 리셋 후 즉시 답글/멘션 스캔 |
+| **중지** | 즉시 중단 |
+| **한 번 실행** | 지금 1회 게시+답글(+발견) 실행 |
 
-### 첫 실행 체크리스트
+### 첫 실행
 
-1. Settings에서 **AI provider**와 **Threads 액세스 토큰**을 설정하고 연결 테스트를 통과합니다.
-2. **Auto**에서 목표·분야·페르소나·보수적인 한도(예: 하루 1–2개)를 설정합니다.
-3. **실시간 게시**를 끄고 (**초안 전용**) → **저장** → **한 번 실행**.
-4. **Drafts**에서 초안을 검토하고 페르소나/한도를 조정합니다.
-5. 준비되면 **실시간 게시**를 켜고 **시작**, 활동 로그를 확인합니다.
+1. Settings에서 AI · Threads 토큰 연결 테스트  
+2. 토큰에 게시·답글·**멘션** 권한 포함 (권한 켠 **이후** 토큰 재발급)  
+3. Auto에서 목표·분야·한도 설정, 실시간 뉴스 보이스 ON 권장  
+4. **실시간 게시 OFF(초안 전용)** → 저장 → 한 번 실행  
+5. 초안 검토 후 실시간 게시 ON → 시작  
 
 > [!IMPORTANT]
-> 완전 자동은 실제 계정에 게시할 수 있습니다. 기본은 꺼져 있으며 **시작**해야 동작하고 **중지**하면
-> 즉시 멈춥니다. 첫 실행은 반드시 **초안 전용**으로 판단 로그를 확인하세요.
+> 완전 자동은 실제 계정에 게시할 수 있습니다. **시작**해야 동작하고 **중지**하면 즉시 멈춥니다.
+> 첫 실행은 반드시 **초안 전용**으로 확인하세요.
 
 ## 주요 기능
 
 | 기능 | 설명 |
 | --- | --- |
-| 📰 **뉴스/블로그 기반 초안** | 관심 주제나 프리셋을 선택하고 Google · Yahoo · Hacker News · Naver · 커스텀 RSS/Atom 피드를 켜고 끌 수 있습니다. |
-| 🤖 **완전 자동 에이전트** | 분야별 자율 판단 → 게시 → 답글 루프, 하루 한도 포함. 기본은 꺼짐, 직접 시작. |
-| 💻 **Local LLM 지원** | Jarvis, Ollama, LM Studio, llama.cpp 같은 로컬 OpenAI 호환 서버. API 비용 없이 실행. |
-| ☁️ **Claude / ChatGPT / Gemini 지원** | 클라우드 모델은 API 키를 넣고 사용. |
-| 🔧 **Other Provider** | OpenAI 호환 커스텀 엔드포인트, 헤더 JSON, 요청 JSON 설정. |
-| 🖼️ **관련 이미지 검색** | AI가 키워드를 만들고 앱이 이미지를 가져오며, 선택한 이미지만 게시에 포함. |
-| 🗣️ **글쓰기 스타일 학습** | 스타일 메모·샘플 글·최근 Threads 글로 내 목소리를 학습. |
-| 💬 **답글 초안** | 미답변 댓글을 가져와 AI 답글 초안 생성 (완전 자동 시 자동 발행). |
-| ⏰ **예약 발행** | 검토한 초안을 원하는 시간에 예약. |
+| 📰 **뉴스/블로그 기반 초안** | 주제·프리셋 + Google · Yahoo · HN · Naver · 커스텀 RSS/Atom |
+| 🤖 **완전 자동** | 이중 타이머, 멘션, 중첩 답글, 발견 답글, 활동 로그 |
+| 🗞️ **실시간 뉴스 상호작용** | 뉴스 우선 · 감정 글 · 팔로워 콜백 · 반복 방지 |
+| 💬 **답글 페이지** | 전체 / 답글 / @멘션 필터 |
+| 💻 **Local LLM** | Jarvis, Ollama, LM Studio 등 OpenAI 호환 — API 비용 $0 |
+| ☁️ **클라우드 모델** | Claude · ChatGPT · Gemini · Other |
+| 🖼️ **이미지 보조** | 키워드 → Wikimedia Commons |
+| 🗣️ **글쓰기 스타일** | 메모 · 샘플 · Threads 가져오기 |
+| ⏰ **예약 발행** | 앱 실행 중 자동 게시, 실패 시 재시도 |
+| 🌍 **UI 언어** | 핵심 화면 다국어 + **설정/Full-Auto EN·KO 완전 지원** |
 
 ## 빠른 시작
 
@@ -502,9 +548,11 @@ npm run build
 npm start
 ```
 
+설치 파일: [Releases](https://github.com/eisenjimmy/autoTHREADS/releases) (최신 **v0.2.8**)
+
 ## AI 설정
 
-앱에서 **Settings → AI provider**를 엽니다.
+**Settings → AI provider**
 
 ### Local LLM (API 비용 $0)
 
@@ -514,52 +562,35 @@ npm start
 | Ollama | `http://localhost:11434/v1` | `llama3.1` |
 | LM Studio | `http://localhost:1234/v1` | 로드한 모델명 |
 
-설정 후 **Test connection**을 누르면 됩니다.
+설정 후 **연결 테스트**.
 
-### 클라우드 모델
+### 클라우드
 
-지원 모델: **Claude · ChatGPT/OpenAI · Gemini · Other (OpenAI 호환 엔드포인트)**
+**Claude · ChatGPT/OpenAI · Gemini · Other (OpenAI 호환)**
 
 ## Threads API 설정
 
-가장 쉬운 방식은 Access Token을 직접 넣는 것입니다.
-
-1. [Meta Developers](https://developers.facebook.com/)에서 앱을 생성/선택합니다.
-2. **Threads API** use case를 추가합니다.
-3. Threads API 설정에서 **Add or Remove Threads Testers**를 누릅니다.
-4. 본인의 Threads 계정을 tester로 추가합니다.
-5. Threads에서 초대 수락이 필요하면 수락합니다.
-6. **User Token Generator**로 돌아가 토큰을 생성합니다.
-7. AutoThreads → **Settings → Threads API**로 이동합니다.
-8. **Access token**에 토큰을 붙여넣고 (**User ID**는 보통 비워둠) **Test connection**을 누릅니다.
-
-OAuth 설정은 고급 옵션으로 남아 있지만, 데스크톱 사용자는 토큰 방식이 가장 간단합니다.
+1. [Meta Developers](https://developers.facebook.com/)에서 앱 선택  
+2. Threads API use case 추가  
+3. Threads Testers에 본인 계정 추가 후 수락  
+4. 게시·답글·**mentions** (선택: keyword search) 권한 켠 뒤 **토큰 생성**  
+5. AutoThreads → **Settings → Threads API**에 Access token 붙여넣기  
+6. User ID는 보통 비움 → **연결 테스트**  
 
 ## 사용 흐름
 
-**보조 모드**
+**보조 모드** — 뉴스 → 초안 → 이미지 → 게시/예약 · 답글 탭에서 답글·멘션 초안  
 
-1. 관심 주제를 추가합니다.
-2. **News**에서 뉴스를 고르고 **Generate draft**를 누릅니다.
-3. 초안을 수정하고 **Suggest images**로 이미지를 고릅니다.
-4. 바로 게시하거나 예약하거나 삭제합니다.
-5. **Replies**에서 답글을 만들고, **Writing style**로 내 스타일을 유지합니다.
-
-**완전 자동**
-
-1. **Auto(자동)** 탭에서 목표·분야·페르소나·한도를 설정합니다.
-2. **완전 자동 시작**을 누릅니다 (미리보기는 초안 전용 모드).
-3. 활동 로그를 보며 에이전트가 알아서 게시·답글하는 것을 확인합니다.
+**완전 자동** — Auto 탭에서 타이머·토글 설정 → 초안 전용으로 한 번 실행 → 검토 후 실시간 시작  
 
 ## 보안과 통제
 
-- ✅ 기본적으로 AI는 초안만 만들고 자동 게시하지 않습니다.
-- ✅ 예약한 글만 예약 시간에 게시됩니다.
-- 🟢 **완전 자동** 모드만 예외이며 직접 "시작"해야 동작하고 언제든 중지할 수 있습니다. 하루 게시·답글 한도로 도배를 방지하고, 초안 전용 모드로 판단만 시킬 수도 있습니다.
-- 🤐 에이전트는 시스템 프롬프트·API 키·토큰·내부 설정을 절대 노출하지 않도록 지시받습니다.
-- 🔐 토큰과 API 키는 OS keychain 기반으로 암호화됩니다.
-- 🚫 렌더러는 직접 파일시스템이나 외부 API에 접근하지 않습니다.
-- 🔗 모든 외부 링크는 시스템 브라우저에서 열립니다.
+- ✅ 보조 모드에서는 초안 검토 후 게시  
+- 🟢 완전 자동만 예외이며 **시작**해야 동작, **중지**로 즉시 중단  
+- 🧯 하루 게시·답글 한도 · 헤드라인 재사용 금지 · 최근 글 기억  
+- 📝 초안 전용 모드로 dry-run 가능  
+- 🔐 토큰·API 키는 OS keychain 암호화  
+- 🤐 시스템 프롬프트·키·토큰 노출 금지 지시  
 
 ## 라이선스
 
