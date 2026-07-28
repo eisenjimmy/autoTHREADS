@@ -5,9 +5,11 @@ import { fetchUnansweredEngagement, searchKeywordPosts } from './threadsApi'
 import { allDrafts, upsertDraft } from './drafts'
 import { postDraftNow } from './scheduler'
 import {
+  collectRecentPostMemory,
   decideAutopilotPlan,
   generateAutopilotPost,
   generateAutopilotReply,
+  postsTooSimilar,
   unconfiguredMessage,
   type AutopilotCandidate,
 } from './pipeline'
@@ -291,33 +293,74 @@ async function runPostPhase(postsToday: number): Promise<number> {
     }
   }
 
-  const rich = await gatherCandidates()
+  // Know what she already posted — avoid repeating the same topic/angle.
+  const recent = await collectRecentPostMemory(15)
+  if (recent.texts.length > 0) {
+    log('info', `Loaded ${recent.texts.length} recent post(s) for anti-repeat memory.`)
+  }
+
+  const richRaw = await gatherCandidates()
+  // Drop news candidates that rehash recent posts/headlines.
+  const rich = richRaw.filter((c) => {
+    if (recent.headlines.some((h) => postsTooSimilar(h, c.title))) return false
+    if (recent.texts.some((t) => postsTooSimilar(t, c.title))) return false
+    return true
+  })
   const slim: AutopilotCandidate[] = rich.map((c) => ({
     index: c.index,
     title: c.title,
     source: c.source,
     category: c.category,
   }))
-  const plan = await decideAutopilotPlan({ candidates: slim, maxPosts: budget, postsToday })
+  const plan = await decideAutopilotPlan({
+    candidates: slim,
+    maxPosts: budget,
+    postsToday,
+    recent,
+  })
   if (plan.reasoning) log('info', `Plan: ${plan.reasoning}${plan.usedFallback ? ' (fallback)' : ''}`)
   if (plan.items.length === 0) {
-    log('skip', 'Decided not to post this round.')
+    log('skip', 'Decided not to post this round (or nothing fresh vs recent posts).')
     return 0
   }
 
+  if (ap.liveNewsInteractive) {
+    log('info', 'Live-news interactive on: prefer current headlines; occasional feelings posts.')
+  }
+
   let created = 0
+  // Grow memory within this run so multi-post ticks stay diverse.
+  const sessionTexts = [...recent.texts]
   for (const item of plan.items) {
     if (postsToday + created >= ap.maxPostsPerDay) break
-    const cand = item.kind === 'news' && typeof item.index === 'number' ? rich.find((c) => c.index === item.index) : undefined
+    const cand =
+      item.kind === 'news' && typeof item.index === 'number'
+        ? rich.find((c) => c.index === item.index)
+        : undefined
+    const genKind =
+      item.kind === 'reflection' ? 'reflection' : cand ? 'news' : item.kind === 'original' ? 'original' : 'news'
+    if (genKind === 'reflection') {
+      log('info', 'Planning a feelings / interactive follower post from recent posts + replies.')
+    }
     const gen = await generateAutopilotPost({
-      kind: cand ? 'news' : 'original',
+      kind: genKind,
       category: item.category ?? cand?.category,
       angle: item.angle,
       newsTitle: cand?.title,
       newsSource: cand?.source,
+      interactive: ap.liveNewsInteractive,
+      recent: {
+        ...recent,
+        texts: sessionTexts,
+        promptBlock: recent.promptBlock,
+      },
     })
     if (!gen.ok) {
       log('error', `Post generation failed: ${gen.message}`)
+      continue
+    }
+    if (sessionTexts.some((t) => postsTooSimilar(t, gen.text))) {
+      log('skip', 'Skipped a near-duplicate of a recent post.')
       continue
     }
     const now = Date.now()
@@ -325,7 +368,10 @@ async function runPostPhase(postsToday: number): Promise<number> {
       id: crypto.randomUUID(),
       kind: 'post',
       text: gen.text,
-      topic: item.category ?? cand?.category,
+      topic:
+        genKind === 'reflection'
+          ? 'reflection'
+          : item.category ?? cand?.category,
       sourceTitle: cand?.title,
       sourceUrl: cand?.link,
       status: 'draft',
@@ -337,10 +383,12 @@ async function runPostPhase(postsToday: number): Promise<number> {
     const preview = gen.text.length > 60 ? gen.text.slice(0, 59) + '…' : gen.text
     if (!ap.goLive) {
       created++
+      sessionTexts.unshift(gen.text)
       void db.set(AP_POSTS, postsToday + created)
       log('post', `Drafted (review): ${preview}`)
     } else if (res.ok) {
       created++
+      sessionTexts.unshift(gen.text)
       void db.set(AP_POSTS, postsToday + created)
       log('post', `Posted: ${preview}`, res.permalink)
     } else {

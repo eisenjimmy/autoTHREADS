@@ -11,7 +11,7 @@ control, or hand the wheel to a self-running agent that posts and replies on its
 
 <br />
 
-![Version](https://img.shields.io/badge/version-0.2.7-111111?style=flat-square)
+![Version](https://img.shields.io/badge/version-0.2.8-111111?style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-111111?style=flat-square)
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-111111?style=flat-square)
 <br />

@@ -29,6 +29,8 @@ export default function AutopilotView() {
         : 5,
     replyToMentions: typeof ap.replyToMentions === 'boolean' ? ap.replyToMentions : true,
     sporadicPosts: typeof ap.sporadicPosts === 'boolean' ? ap.sporadicPosts : true,
+    liveNewsInteractive:
+      typeof ap.liveNewsInteractive === 'boolean' ? ap.liveNewsInteractive : true,
     engageDiscover: typeof ap.engageDiscover === 'boolean' ? ap.engageDiscover : false,
     maxDiscoverRepliesPerRun:
       typeof ap.maxDiscoverRepliesPerRun === 'number' && Number.isFinite(ap.maxDiscoverRepliesPerRun)
@@ -509,6 +511,40 @@ export default function AutopilotView() {
                 {t(
                   'When on, randomly skips some post ticks so you don’t publish like a metronome.',
                   '켜면 게시 주기를 가끔 건너뛰어 시계처럼 올리지 않습니다.',
+                )}
+              </span>
+            </div>
+            <div className="field">
+              <label
+                className="toggle"
+                title={t(
+                  'Primary posts react to CURRENT scraped news (not recycled LLM riffs). Sometimes she shares feelings from the last 3 posts + replies and talks to followers about earlier remarks — more interactive, less repetitive.',
+                  '기본 게시는 최신 스크랩 뉴스 반응입니다(반복 LLM 혼잣말 아님). 가끔 최근 3개 글·답글을 바탕으로 감정을 나누고, 이전 발언을 팔로워에게 언급해 더 상호작용합니다.'
+                )}
+              >
+                <input
+                  type="checkbox"
+                  checked={form.liveNewsInteractive}
+                  onChange={(e) => edit({ liveNewsInteractive: e.target.checked })}
+                />
+                <span>
+                  {t('Live news + interactive voice', '실시간 뉴스 + 상호작용 보이스')}
+                  <span
+                    className="hint-tip"
+                    title={t(
+                      'Primary posts react to CURRENT scraped news (not recycled LLM riffs). Sometimes she shares feelings from the last 3 posts + replies and talks to followers about earlier remarks — more interactive, less repetitive.',
+                      '기본 게시는 최신 스크랩 뉴스 반응입니다(반복 LLM 혼잣말 아님). 가끔 최근 3개 글·답글을 바탕으로 감정을 나누고, 이전 발언을 팔로워에게 언급해 더 상호작용합니다.'
+                    )}
+                  >
+                    {' '}
+                    (?)
+                  </span>
+                </span>
+              </label>
+              <span className="hint">
+                {t(
+                  'News-first feed · occasional “how I feel” posts · callbacks to followers about prior takes. Hover (?) for details.',
+                  '뉴스 우선 · 가끔 감정 글 · 이전 발언을 팔로워에게 다시 언급. (?)에 마우스를 올려 자세히 보세요.'
                 )}
               </span>
             </div>

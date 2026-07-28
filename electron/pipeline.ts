@@ -2,12 +2,155 @@ import { db } from './localdb'
 import { getSettings } from './settings'
 import { generateText } from './llm'
 import { fetchTopicNews } from './news'
-import { upsertDraft } from './drafts'
+import { allDrafts, upsertDraft } from './drafts'
+import { scrapeRecentTexts } from './threadsApi'
 import type { AppSettings, GenerateResult, LanguageCode, PostLanguageMode, StyleSettings } from './types'
 
 const MAX_CHARS = 500
 const USED_LINKS_KEY = 'usedNewsLinks'
 const TOPIC_IDX_KEY = 'autoDraftTopicIdx'
+const RECENT_MEMORY_LIMIT = 15
+
+/** What the account has been posting about — used to avoid repeats + interactive callbacks. */
+export type RecentPostMemory = {
+  texts: string[]
+  topics: string[]
+  headlines: string[]
+  /** Last few reply drafts/posts (inbound context for "feelings" posts). */
+  recentReplies: string[]
+  /** Compact bullet list for LLM prompts. */
+  promptBlock: string
+}
+
+function significantWords(text: string): Set<string> {
+  return new Set(
+    text
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+      .split(/\s+/)
+      .filter((w) => w.length > 3)
+  )
+}
+
+/** True when two posts share most content words (topic/angle collision). */
+export function postsTooSimilar(a: string, b: string): boolean {
+  const A = significantWords(a)
+  const B = significantWords(b)
+  if (A.size < 3 || B.size < 3) return false
+  let inter = 0
+  for (const w of A) if (B.has(w)) inter++
+  const denom = Math.min(A.size, B.size)
+  return inter / denom >= 0.45
+}
+
+function buildRecentReplyLines(): string[] {
+  return allDrafts()
+    .filter((d) => d.kind === 'reply' && d.text.trim().length > 0)
+    .sort((a, b) => (b.postedAt ?? b.updatedAt ?? b.createdAt) - (a.postedAt ?? a.updatedAt ?? a.createdAt))
+    .slice(0, 8)
+    .map((d) => {
+      const who = d.replyToUsername ? `@${d.replyToUsername}` : 'someone'
+      const inbound = (d.replyToText || '').replace(/\s+/g, ' ').trim().slice(0, 80)
+      const mine = d.text.replace(/\s+/g, ' ').trim().slice(0, 100)
+      return inbound
+        ? `${who}: "${inbound}" → you: "${mine}"`
+        : `you replied: "${mine}"`
+    })
+}
+
+/** Collect recent posts from local drafts (posted + pending). */
+export function collectLocalRecentPosts(limit = RECENT_MEMORY_LIMIT): RecentPostMemory {
+  const drafts = allDrafts()
+    .filter((d) => d.kind === 'post' && d.text.trim().length > 0)
+    .sort((a, b) => (b.postedAt ?? b.updatedAt ?? b.createdAt) - (a.postedAt ?? a.updatedAt ?? a.createdAt))
+    .slice(0, limit)
+
+  const texts = drafts.map((d) => d.text.trim())
+  const topics = drafts.map((d) => (d.topic || '').trim()).filter(Boolean)
+  const headlines = drafts.map((d) => (d.sourceTitle || '').trim()).filter(Boolean)
+  const recentReplies = buildRecentReplyLines()
+
+  const lines: string[] = []
+  drafts.slice(0, 12).forEach((d, i) => {
+    const topic = d.topic ? ` [${d.topic}]` : ''
+    const head = d.sourceTitle ? ` · news: ${d.sourceTitle.slice(0, 80)}` : ''
+    const preview = d.text.replace(/\s+/g, ' ').trim().slice(0, 140)
+    lines.push(`${i + 1}.${topic}${head}\n   "${preview}${d.text.length > 140 ? '…' : ''}"`)
+  })
+
+  const replyBlock =
+    recentReplies.length > 0
+      ? `\nRECENT REPLIES (use for interactive callbacks / feelings, not to re-argue):\n${recentReplies
+          .slice(0, 6)
+          .map((r, i) => `${i + 1}. ${r}`)
+          .join('\n')}`
+      : ''
+
+  return {
+    texts,
+    topics,
+    headlines,
+    recentReplies,
+    promptBlock:
+      lines.length > 0
+        ? `RECENT POSTS (do NOT repeat these topics, angles, headlines, or near-duplicate wording):\n${lines.join('\n')}${replyBlock}`
+        : `RECENT POSTS: (none yet — any fresh angle is fine)${replyBlock}`,
+  }
+}
+
+/** Merge local drafts with live Threads posts when a token is available. */
+export async function collectRecentPostMemory(limit = RECENT_MEMORY_LIMIT): Promise<RecentPostMemory> {
+  const local = collectLocalRecentPosts(limit)
+  const settings = getSettings()
+  if (!settings.threads.accessToken) return local
+  try {
+    const live = await scrapeRecentTexts(
+      { accessToken: settings.threads.accessToken, userId: settings.threads.userId },
+      10
+    )
+    const texts = [...local.texts]
+    for (const t of live) {
+      const trimmed = t.trim()
+      if (!trimmed) continue
+      if (texts.some((x) => postsTooSimilar(x, trimmed) || x === trimmed)) continue
+      texts.push(trimmed)
+    }
+    const lines = texts.slice(0, 12).map((t, i) => {
+      const preview = t.replace(/\s+/g, ' ').trim().slice(0, 140)
+      return `${i + 1}. "${preview}${t.length > 140 ? '…' : ''}"`
+    })
+    const replyBlock =
+      local.recentReplies.length > 0
+        ? `\nRECENT REPLIES:\n${local.recentReplies
+            .slice(0, 6)
+            .map((r, i) => `${i + 1}. ${r}`)
+            .join('\n')}`
+        : ''
+    return {
+      texts: texts.slice(0, limit),
+      topics: local.topics,
+      headlines: local.headlines,
+      recentReplies: local.recentReplies,
+      promptBlock:
+        lines.length > 0
+          ? `RECENT POSTS from this account (do NOT repeat these topics, angles, or near-duplicate wording):\n${lines.join('\n')}\nAlso avoid reusing these recent topics/categories: ${[...new Set(local.topics)].slice(0, 10).join(', ') || '(none)'}\nAlso avoid these headlines already covered: ${local.headlines.slice(0, 8).join(' | ') || '(none)'}${replyBlock}`
+          : local.promptBlock,
+    }
+  } catch {
+    return local
+  }
+}
+
+/** Prefer niches not used in the last few posts. */
+export function pickFreshCategory(niches: string[], recentTopics: string[]): string {
+  const pool = niches.length > 0 ? niches : ['ai', 'technology', 'startups', 'productivity', 'humor']
+  const recent = recentTopics.map((t) => t.toLowerCase())
+  // Count recent uses — avoid the last 1–3 topics when possible.
+  const last = recent.slice(0, 5)
+  const fresh = pool.filter((n) => !last.includes(n.toLowerCase()))
+  const choices = fresh.length > 0 ? fresh : pool
+  return choices[Math.floor(Math.random() * choices.length)] ?? 'ai'
+}
 
 export function unconfiguredMessage(llm: AppSettings['llm']): string | null {
   if (llm.provider === 'claude' && !llm.claude.apiKey.trim())
@@ -282,11 +425,14 @@ function buildPersonaPrompt(settings: AppSettings, kind: 'post' | 'reply', categ
 }
 
 export interface AutopilotPostInput {
-  kind: 'news' | 'original'
+  kind: 'news' | 'original' | 'reflection'
   category?: string
   angle?: string
   newsTitle?: string
   newsSource?: string
+  recent?: RecentPostMemory
+  /** When true: invite followers, reference prior remarks, feel conversational. */
+  interactive?: boolean
 }
 
 export async function generateAutopilotPost(input: AutopilotPostInput): Promise<GenerateResult> {
@@ -294,17 +440,44 @@ export async function generateAutopilotPost(input: AutopilotPostInput): Promise<
   const missing = unconfiguredMessage(settings.llm)
   if (missing) return { ok: false, text: '', message: missing }
   const ap = settings.autopilot
+  const recent = input.recent ?? collectLocalRecentPosts()
+  const interactive = input.interactive ?? ap.liveNewsInteractive
   const parts: string[] = []
   const niche = input.category?.trim() || 'ai'
   const hasReference = input.kind === 'news' && Boolean(input.newsTitle)
-  if (hasReference) {
+
+  if (input.kind === 'reflection') {
+    const last3 = recent.texts.slice(0, 3)
+    parts.push(
+      'Write a short Threads post about how YOU feel as this account — reflective, warm, a little vulnerable or playful.'
+    )
+    parts.push(
+      'Use the LAST 3 POSTS and RECENT REPLIES as emotional context (what you talked about, what people said back).'
+    )
+    if (last3.length > 0) {
+      parts.push('Your last posts were:')
+      last3.forEach((t, i) => parts.push(`${i + 1}. "${t.replace(/\s+/g, ' ').slice(0, 160)}"`))
+    }
+    if (recent.recentReplies.length > 0) {
+      parts.push('Recent reply vibes:')
+      recent.recentReplies.slice(0, 4).forEach((r) => parts.push(`- ${r}`))
+    }
+    parts.push(
+      'Talk TO your followers: e.g. thank them, ask a follow-up, reference a previous take without copy-pasting it. Invite replies.'
+    )
+  } else if (hasReference) {
     const src = input.newsSource ? ` (${input.newsSource})` : ''
     parts.push(
-      `Write a native "${niche}" Threads post reacting to this headline: "${input.newsTitle}"${src}.`
+      `Write a native "${niche}" Threads post reacting to this CURRENT news headline: "${input.newsTitle}"${src}.`
     )
     parts.push(
-      'Give ONE sharp, human angle, opinion, or joke — the kind popular accounts in this niche post. Not a summary. Not a press release.'
+      'This is ABOUT the news — a human take on something happening now. Not a recycled generic LLM remark. Not a summary dump.'
     )
+    if (interactive) {
+      parts.push(
+        'End with a light hook for followers (question or "am I the only one…") when it fits. Stay under the character limit.'
+      )
+    }
   } else {
     parts.push(
       `Write an ORIGINAL Threads post in the popular "${niche}" niche — the kind of post that gets replies and quotes on Threads today.`
@@ -312,10 +485,34 @@ export async function generateAutopilotPost(input: AutopilotPostInput): Promise<
     parts.push(
       'It does NOT have to be about news. Prefer shower-thought, hot take, "just tried X", tiny builder story, or a question to the timeline.'
     )
+    if (interactive && recent.texts.length > 0) {
+      parts.push(
+        'Optionally wink at a previous remark you made (without repeating it) so the feed feels continuous and interactive.'
+      )
+    }
   }
   if (input.angle) parts.push(`Suggested angle: ${input.angle}.`)
-  parts.push(languageDirective(ap.postLanguage, settings.language, hasReference))
-  return runGeneration(settings, parts.join(' '), buildPersonaPrompt(settings, 'post', niche))
+  parts.push(
+    'CRITICAL: Do NOT repeat or closely rehash anything from RECENT POSTS below. Pick a clearly different sub-topic, angle, example, or joke. No near-duplicates.'
+  )
+  parts.push(recent.promptBlock)
+  parts.push(languageDirective(ap.postLanguage, settings.language, hasReference || input.kind === 'reflection'))
+
+  let result = await runGeneration(settings, parts.join(' '), buildPersonaPrompt(settings, 'post', niche))
+  // One forced rewrite if the model echoed a recent post.
+  if (result.ok && recent.texts.some((t) => postsTooSimilar(result.text, t))) {
+    const retryParts = [
+      ...parts,
+      'Your previous draft was too similar to a recent post. Rewrite with a DIFFERENT topic and angle entirely.',
+    ]
+    const retry = await runGeneration(
+      settings,
+      retryParts.join(' '),
+      buildPersonaPrompt(settings, 'post', niche)
+    )
+    if (retry.ok) result = retry
+  }
+  return result
 }
 
 export interface AutopilotReplyInput {
@@ -376,7 +573,7 @@ export interface AutopilotCandidate {
 }
 
 export interface AutopilotPlanItem {
-  kind: 'news' | 'original'
+  kind: 'news' | 'original' | 'reflection'
   index?: number
   category?: string
   angle?: string
@@ -414,22 +611,52 @@ function extractJsonObject(raw: string): unknown {
   return null
 }
 
+/** Effective original% — live-news mode forces news-first unless we pick a reflection. */
+export function effectiveOriginalRatio(ap: { originalRatio: number; liveNewsInteractive: boolean }): number {
+  if (!ap.liveNewsInteractive) return ap.originalRatio
+  // Cap original fluff so most posts react to scraped news.
+  return Math.min(ap.originalRatio, 18)
+}
+
 /** Heuristic fallback plan when the model won't produce usable JSON. */
-function fallbackPlan(candidates: AutopilotCandidate[], maxPosts: number, originalRatio: number): AutopilotPlanItem[] {
+function fallbackPlan(
+  candidates: AutopilotCandidate[],
+  maxPosts: number,
+  originalRatio: number,
+  recent?: RecentPostMemory,
+  liveNewsInteractive = false
+): AutopilotPlanItem[] {
   const settings = getSettings()
   const niches =
     settings.autopilot.categories.length > 0
       ? settings.autopilot.categories
       : ['ai', 'technology', 'startups', 'productivity', 'humor']
+  const recentTopics = recent?.topics ?? []
+  // Prefer news candidates whose titles don't overlap recent posts/headlines.
+  const freshNews = candidates.filter((c) => {
+    const blob = `${c.title} ${c.category}`
+    if (recent?.headlines.some((h) => postsTooSimilar(h, c.title))) return false
+    if (recent?.texts.some((t) => postsTooSimilar(t, blob))) return false
+    return true
+  })
+  const newsPool = freshNews.length > 0 ? freshNews : candidates
   const items: AutopilotPlanItem[] = []
   for (let i = 0; i < maxPosts; i++) {
-    const goOriginal = candidates.length === 0 || Math.random() * 100 < originalRatio
+    // ~22% of ticks: feelings / interactive callback when we have history.
+    if (liveNewsInteractive && (recent?.texts.length ?? 0) >= 1 && Math.random() < 0.22) {
+      items.push({
+        kind: 'reflection',
+        category: pickFreshCategory(niches, recentTopics),
+        angle: 'feelings + talk to followers about recent posts/replies',
+      })
+      continue
+    }
+    const goOriginal = newsPool.length === 0 || Math.random() * 100 < originalRatio
     if (goOriginal) {
-      // Prefer AI / first configured popular niche when inventing original posts.
-      const cat = candidates[i]?.category ?? niches[i % niches.length] ?? 'ai'
-      items.push({ kind: 'original', category: cat })
+      const cat = pickFreshCategory(niches, recentTopics)
+      items.push({ kind: 'original', category: cat, angle: 'fresh angle, not a repeat of recent posts' })
     } else {
-      const cand = candidates[i % candidates.length]
+      const cand = newsPool[i % newsPool.length]
       items.push({ kind: 'news', index: cand.index, category: cand.category })
     }
   }
@@ -444,6 +671,7 @@ export async function decideAutopilotPlan(input: {
   candidates: AutopilotCandidate[]
   maxPosts: number
   postsToday: number
+  recent?: RecentPostMemory
 }): Promise<{ items: AutopilotPlanItem[]; reasoning: string; usedFallback: boolean }> {
   const settings = getSettings()
   const ap = settings.autopilot
@@ -453,26 +681,38 @@ export async function decideAutopilotPlan(input: {
   const missing = unconfiguredMessage(settings.llm)
   if (missing) return { items: [], reasoning: missing, usedFallback: false }
 
+  const recent = input.recent ?? collectLocalRecentPosts()
+  const live = ap.liveNewsInteractive
+  const origRatio = effectiveOriginalRatio(ap)
   const niches = ap.categories.length > 0 ? ap.categories.join(', ') : 'ai, technology, startups, productivity, humor'
   const system = [
     'You are the planning brain of an autonomous Threads account focused on audience growth.',
     `Goal: ${ap.goal.trim() || 'grow an engaged following.'}`,
-    `Niches (pick from these; bias toward popular Threads categories like AI when relevant): ${niches}.`,
-    'Prefer posts that would feel at home on popular niche timelines (especially AI Threads, tech builders, startups, productivity, humor).',
+    `Niches (pick from these; rotate — do not stay stuck on one niche): ${niches}.`,
+    live
+      ? 'MODE: live-news interactive. PRIMARY job is CURRENT scraped news reactions. Prefer kind "news" whenever a good fresh headline exists.'
+      : 'Prefer posts that would feel at home on popular niche timelines.',
     `You have already posted ${input.postsToday} time(s) today and may post at most ${maxPosts} more right now.`,
-    `Roughly ${ap.originalRatio}% of posts should be original/relatable/funny content (not tied to news); the rest can react to a headline.`,
-    'When kind is "original", set "category" to one of the niches above (prefer high-engagement ones like "ai" when it fits).',
+    `Roughly ${origRatio}% of posts may be original (non-news); the rest should react to a CURRENT headline when candidates exist.`,
+    live
+      ? 'Occasionally (about 1 in 5 plans) you may choose kind "reflection" — feelings based on the last few posts + replies, talking to followers about prior remarks. No news index needed.'
+      : 'When kind is "original", set "category" to one of the niches above — prefer a niche NOT used in the most recent posts.',
+    'When kind is "original", set "category" to one of the niches above — prefer a niche NOT used in the most recent posts.',
+    'CRITICAL anti-repeat rules:',
+    '- Never plan a post that reuses the same news headline, story, or near-same angle as RECENT POSTS.',
+    '- Rotate categories and ideas. If recent posts were about one AI tool/topic, pick something else.',
+    '- Prefer empty posts[] over another repetitive post.',
     'Avoid spamming: it is completely fine — often best — to post fewer than the maximum, or nothing at all if nothing is worth it.',
     'Decide what to post right now. Respond with ONLY a JSON object, no prose, in exactly this shape:',
-    '{"reasoning":"one short sentence","posts":[{"kind":"news","index":0,"angle":"short angle"},{"kind":"original","category":"ai","angle":"short idea"}]}',
-    'Use "index" only for kind "news", referencing a candidate index below. "posts" may be an empty array.',
+    '{"reasoning":"one short sentence","posts":[{"kind":"news","index":0,"angle":"short angle"},{"kind":"reflection","angle":"feelings about last posts"},{"kind":"original","category":"ai","angle":"short idea"}]}',
+    'Use "index" only for kind "news". kind may be "news" | "original" | "reflection". "posts" may be an empty array.',
   ].join('\n')
 
   const candidateLines =
     input.candidates.length > 0
       ? input.candidates.map((c) => `[${c.index}] (${c.category}) ${c.title} — ${c.source}`).join('\n')
       : '(no fresh headlines available right now)'
-  const user = `Candidate headlines:\n${candidateLines}\n\nReturn your JSON decision now.`
+  const user = `${recent.promptBlock}\n\nCandidate CURRENT headlines (skip any that overlap recent posts):\n${candidateLines}\n\nReturn your JSON decision now.`
 
   let raw = ''
   try {
@@ -480,7 +720,7 @@ export async function decideAutopilotPlan(input: {
   } catch (err) {
     console.error('[pipeline] autopilot planning call failed', err)
     return {
-      items: fallbackPlan(input.candidates, Math.min(maxPosts, 1), ap.originalRatio),
+      items: fallbackPlan(input.candidates, Math.min(maxPosts, 1), origRatio, recent, live),
       reasoning: 'Planning call failed; used a safe fallback.',
       usedFallback: true,
     }
@@ -489,7 +729,7 @@ export async function decideAutopilotPlan(input: {
   const parsed = extractJsonObject(raw) as { reasoning?: unknown; posts?: unknown } | null
   if (!parsed || !Array.isArray(parsed.posts)) {
     return {
-      items: fallbackPlan(input.candidates, Math.min(maxPosts, 1), ap.originalRatio),
+      items: fallbackPlan(input.candidates, Math.min(maxPosts, 1), origRatio, recent, live),
       reasoning: 'Model output was not usable JSON; used a fallback.',
       usedFallback: true,
     }
@@ -502,15 +742,49 @@ export async function decideAutopilotPlan(input: {
     if (!rawItem || typeof rawItem !== 'object') continue
     const p = rawItem as { kind?: unknown; index?: unknown; category?: unknown; angle?: unknown }
     const angle = typeof p.angle === 'string' ? p.angle.slice(0, 200) : undefined
-    const category = typeof p.category === 'string' ? p.category.slice(0, 60) : undefined
-    if (p.kind === 'news') {
+    let category = typeof p.category === 'string' ? p.category.slice(0, 60) : undefined
+    if (p.kind === 'reflection') {
+      if (!live) continue
+      items.push({
+        kind: 'reflection',
+        category:
+          category ||
+          pickFreshCategory(
+            ap.categories.length > 0 ? ap.categories : ['ai', 'technology', 'startups', 'productivity', 'humor'],
+            recent.topics
+          ),
+        angle: angle || 'feelings + interactive follower callback',
+      })
+    } else if (p.kind === 'news') {
       const idx = Math.floor(Number(p.index))
       const cand = Number.isFinite(idx) ? byIndex.get(idx) : undefined
       if (!cand) continue
+      // Drop news that rehashes a recent headline.
+      if (recent.headlines.some((h) => postsTooSimilar(h, cand.title))) continue
+      if (recent.texts.some((t) => postsTooSimilar(t, cand.title))) continue
       items.push({ kind: 'news', index: cand.index, category: cand.category, angle })
     } else {
+      // In live-news mode, convert stray "original" to news when candidates exist.
+      if (live && byIndex.size > 0 && Math.random() < 0.7) {
+        const cand = input.candidates[Math.floor(Math.random() * input.candidates.length)]
+        if (cand && !recent.headlines.some((h) => postsTooSimilar(h, cand.title))) {
+          items.push({ kind: 'news', index: cand.index, category: cand.category, angle })
+          continue
+        }
+      }
+      if (!category || recent.topics.slice(0, 3).map((t) => t.toLowerCase()).includes(category.toLowerCase())) {
+        category = pickFreshCategory(
+          ap.categories.length > 0 ? ap.categories : ['ai', 'technology', 'startups', 'productivity', 'humor'],
+          recent.topics
+        )
+      }
       items.push({ kind: 'original', category, angle })
     }
+  }
+  // If live mode planned nothing but we have news, force one news item.
+  if (live && items.length === 0 && input.candidates.length > 0 && maxPosts > 0) {
+    const cand = input.candidates[0]
+    items.push({ kind: 'news', index: cand.index, category: cand.category, angle: 'fresh take on current news' })
   }
   const reasoning = typeof parsed.reasoning === 'string' ? parsed.reasoning.slice(0, 240) : ''
   return { items, reasoning, usedFallback: false }

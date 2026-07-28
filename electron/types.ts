@@ -73,6 +73,11 @@ export interface AutopilotSettings {
   /** Skip some post ticks at random so the feed feels less robotic ("here and there"). */
   sporadicPosts: boolean
   /**
+   * Prefer fresh scraped news for most posts; occasionally share feelings based on
+   * the last few posts + replies and talk to followers about prior remarks.
+   */
+  liveNewsInteractive: boolean
+  /**
    * Reply to random public posts found via keyword search in your niches.
    * Needs threads_keyword_search on the token (public results need advanced access).
    */

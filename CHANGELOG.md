@@ -9,6 +9,23 @@ Session-level notes also live under `_changelog/`.
 
 ---
 
+## [0.2.8] — 2026-07-27
+
+### Added
+
+- **Live news + interactive voice** toggle (default on) on Full-Auto:
+  - Prefer **current scraped news** for most posts (not recycled original LLM riffs)
+  - Occasionally post **feelings** using the last 3 posts + recent replies
+  - Talk to followers with light callbacks to prior remarks
+  - EN/KO tooltip on the control explaining behavior
+- Settings tab fully bilingual EN/KO (from prior session)
+
+### Changed
+
+- Planning/generation use recent post + reply memory for anti-repeat and interactive hooks.
+
+---
+
 ## [0.2.7] — 2026-07-27
 
 ### Added

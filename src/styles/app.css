@@ -1280,6 +1280,22 @@ body {
   border-bottom: 1px solid var(--border);
 }
 
+.hint-tip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.1em;
+  height: 1.1em;
+  margin-left: 4px;
+  border-radius: 99px;
+  border: 1px solid var(--border-strong);
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-faint);
+  cursor: help;
+  vertical-align: middle;
+}
+
 .badge-mention {
   background: color-mix(in srgb, var(--accent) 22%, transparent);
   border: 1px solid color-mix(in srgb, var(--accent) 50%, var(--border));

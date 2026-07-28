@@ -60,7 +60,7 @@ export function defaultAutopilot(): AutopilotSettings {
     toneNotes: '',
     maxPostsPerDay: 6,
     maxPostsPerRun: 1,
-    originalRatio: 40,
+    originalRatio: 25, // default lean news-first; liveNewsInteractive lowers this further
     agentName: '',
     creatorName: '',
     creatorHandle: '',
@@ -71,6 +71,7 @@ export function defaultAutopilot(): AutopilotSettings {
     maxRepliesPerRun: 15, // allow multiple replies in an ongoing thread per tick
     maxRepliesPerDay: 100,
     sporadicPosts: true, // post "here and there" instead of every single tick
+    liveNewsInteractive: true, // scrape news + occasional feelings / follower callbacks
     engageDiscover: false, // opt-in: reply to random public posts in niches
     maxDiscoverRepliesPerRun: 2,
     maxDiscoverRepliesPerDay: 20,
@@ -275,6 +276,8 @@ function normalizeAutopilot(
     maxRepliesPerRun: clampInt(r.maxRepliesPerRun, 1, 25, d.maxRepliesPerRun),
     maxRepliesPerDay: clampInt(r.maxRepliesPerDay, 1, 300, d.maxRepliesPerDay),
     sporadicPosts: typeof r.sporadicPosts === 'boolean' ? r.sporadicPosts : d.sporadicPosts,
+    liveNewsInteractive:
+      typeof r.liveNewsInteractive === 'boolean' ? r.liveNewsInteractive : d.liveNewsInteractive,
     engageDiscover: typeof r.engageDiscover === 'boolean' ? r.engageDiscover : d.engageDiscover,
     maxDiscoverRepliesPerRun: clampInt(r.maxDiscoverRepliesPerRun, 0, 10, d.maxDiscoverRepliesPerRun),
     maxDiscoverRepliesPerDay: clampInt(r.maxDiscoverRepliesPerDay, 0, 100, d.maxDiscoverRepliesPerDay),

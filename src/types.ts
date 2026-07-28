@@ -63,6 +63,7 @@ export interface AutopilotSettings {
   maxRepliesPerRun: number
   maxRepliesPerDay: number
   sporadicPosts: boolean
+  liveNewsInteractive: boolean
   engageDiscover: boolean
   maxDiscoverRepliesPerRun: number
   maxDiscoverRepliesPerDay: number
