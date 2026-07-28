@@ -9,6 +9,14 @@ Session-level notes also live under `_changelog/`.
 
 ---
 
+## [0.2.11] — 2026-07-28
+
+### Added
+
+- **News source link in AI posts** — Full-Auto, News → Generate draft, and auto-draft posts that react to a headline always append the real article URL at the end (deterministic; body truncated if needed to stay under 500 chars).
+
+---
+
 ## [0.2.10] — 2026-07-28
 
 ### Fixed / safety
