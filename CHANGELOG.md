@@ -9,6 +9,20 @@ Session-level notes also live under `_changelog/`.
 
 ---
 
+## [0.2.13] — 2026-07-28
+
+### Fixed
+
+- **Full-Auto posts were starving** — sporadic mode skipped ~45% of hourly ticks (sometimes back-to-back). Now ~18% skip, never two skips in a row, and **Run once** always posts.
+- **Empty planner no longer idles** — if the LLM plan returns no items, force one news or original post so the feed stays active.
+- **@mentions** — paginate Mentions API (`/me` + user id), process mentions before replies, log raw Mentions API counts in the activity log, and surface Meta’s Advanced Access / tester-only limitation when the API returns 0.
+
+### Docs
+
+- README + Full-Auto UI explain sporadic behavior and Advanced Access for `threads_manage_mentions`.
+
+---
+
 ## [0.2.12] — 2026-07-28
 
 ### Added

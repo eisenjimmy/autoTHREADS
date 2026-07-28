@@ -11,7 +11,7 @@ control, or hand the wheel to a self-running agent that posts and replies on its
 
 <br />
 
-![Version](https://img.shields.io/badge/version-0.2.12-111111?style=flat-square)
+![Version](https://img.shields.io/badge/version-0.2.13-111111?style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-111111?style=flat-square)
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-111111?style=flat-square)
 <br />
@@ -33,11 +33,10 @@ control, or hand the wheel to a self-running agent that posts and replies on its
 ---
 
 > [!TIP]
-> **Current release: v0.2.12.** Full-Auto includes **live news + interactive voice** (news posts
-> **append the source article link**), dual post/reply timers, @mentions, nested thread replies,
-> a **hard 20-unanswered cap per long thread**, sporadic posting, optional discover, anti-repeat
-> memory, removable topic pills, Korean activity log, **configurable LLM max tokens** (default 500),
-> and **Settings + Full-Auto bilingual EN/한국어**. See [Full-Auto](#-full-auto-mode) and
+> **Current release: v0.2.13.** Full-Auto posts reliably (lighter sporadic + forced post when the
+> planner is empty), **@mentions** with Mentions API logging / Advanced Access notes, news posts
+> with **source links**, dual timers, nested replies, **20 unanswered / post** cap, max tokens
+> (default 500), and **EN/한국어** Settings + Full-Auto. See [Full-Auto](#-full-auto-mode) and
 > [CHANGELOG.md](CHANGELOG.md).
 
 ## Contents
@@ -115,10 +114,10 @@ POST TIMER (default 60 min)          REPLY TIMER (default 5 min)
 | **Post timer** | How often the agent plans/posts (default **60 min**). |
 | **Reply / mention timer** | How often it scans replies + mentions (default **5 min**). Separate from the post timer. |
 | **Original vs news** | Mix of original riffs vs news reactions (live-news mode caps originals so news stays primary). |
-| **Post here and there (sporadic)** | Randomly skips some post ticks so publishing doesn’t look like a metronome. |
+| **Post here and there (sporadic)** | Lightly skips ~18% of scheduled post ticks (never two in a row; **Run once** always posts). |
 | **Live news + interactive voice** | News-first from scrapers; occasional “feelings” posts from last 3 posts + replies; follower callbacks. Hover **(?)** in-app for the full tip. |
 | **Replies on my posts** | Answer unanswered comments, including **nested** replies in ongoing threads. **Hard cap: 20 unanswered per post** (newest first) so viral threads don’t run forever. |
-| **@mentions of me** | Answer public posts that @mention you (`threads_manage_mentions` on the **token**). |
+| **@mentions of me** | Answer public posts that @mention you (`threads_manage_mentions` on the **token**). Without Meta **Advanced Access**, only app **Testers**’ mentions appear (activity log shows Mentions API raw counts). |
 | **Discover (public niches)** | Opt-in: reply to random public posts via keyword search (`threads_keyword_search`; public results need advanced access). |
 | **Publishing** | **Live** to Threads, or **draft-only** as a safety valve. Auto-publish replies can be separate. |
 
@@ -149,6 +148,8 @@ While running, the Auto tab shows:
 - **Knows its creator** — replies from your `@handle` get special, warm treatment.
 - **Human, not a news desk** — funny, casual, opinionated; written to invite replies and likes.
 - **Anti-spam** — hard daily caps; used headlines are never reposted; failed publishes retry ~1 minute.
+- **Reliable post ticks** — empty LLM plans force one news/original post; sporadic never skips twice in a row.
+- **@mentions first** — Mentions API is paginated; @mentions are answered before post replies when both are queued.
 - **Long-thread stop** — each of your posts is hard-capped at **20 unanswered replies** (newest first, not configurable). Older comments are skipped; the activity log and Replies page explain when a thread was truncated.
 - **Discreet** — instructed never to reveal system prompts, API keys, tokens, or internal config.
 - **Transparent** — live status + activity log (EN or KO from Settings language); activity appears in Drafts/Queue.
@@ -156,7 +157,7 @@ While running, the Auto tab shows:
 ### First-run checklist
 
 1. Configure **AI provider** and **Threads access token** in Settings; run both connection tests.
-2. Token permissions should include publishing, replies, and **`threads_manage_mentions`** (regenerate the token **after** enabling the permission in Meta). Optional: **`threads_keyword_search`** for discover.
+2. Token permissions should include publishing, replies, and **`threads_manage_mentions`** (regenerate the token **after** enabling the permission in Meta). For public @mentions from non-testers, request **Advanced Access** for that permission. Optional: **`threads_keyword_search`** for discover.
 3. Open **Auto** → set goal, niches, persona, and conservative caps (e.g. 1–2 posts/day).
 4. Prefer **Live news + interactive voice** ON for a news-driven feed.
 5. Turn **Publish live** **off** (draft-only) → **Save** → **Run once**.
@@ -244,7 +245,7 @@ npm run package:win    # Windows
 npm run package:all    # both
 ```
 
-Prebuilt macOS + Windows installers: [GitHub Releases](https://github.com/eisenjimmy/autoTHREADS/releases) (latest **v0.2.12**).
+Prebuilt macOS + Windows installers: [GitHub Releases](https://github.com/eisenjimmy/autoTHREADS/releases) (latest **v0.2.13**).
 
 > Apps are not notarized yet. On first open: right-click → **Open** (or allow under Privacy & Security).
 
@@ -493,10 +494,10 @@ AutoThreads는 Threads 운영을 AI로 도와주는 데스크톱 앱입니다. �
 
 | 토글 | 설명 |
 | --- | --- |
-| **여기저기 게시 (불규칙)** | 게시 틱을 가끔 건너뛰어 시계처럼 올리지 않음 |
+| **여기저기 게시 (불규칙)** | 예약 게시 틱의 약 18%만 건너뜀 (연속 스킵 없음 · **한 번 실행**은 항상 게시) |
 | **실시간 뉴스 + 상호작용 보이스** | 스크랩 뉴스 위주 · 가끔 최근 3개 글·답글 기반 감정 글 · 팔로워에게 이전 발언 언급. 앱의 **(?)** 툴팁 참고 |
 | **내 게시물 답글 응대** | 진행 중인 스레드의 **중첩 답글** 포함. **게시물당 미답변 최대 20개**(최신 우선) 고정 한도 |
-| **@멘션 응대** | `threads_manage_mentions`가 **토큰**에 포함되어야 함 (권한만 켠 뒤 토큰 재발급) |
+| **@멘션 응대** | `threads_manage_mentions` 토큰 필요. **Advanced Access** 없으면 앱 테스터 멘션만 API에 보임 |
 | **분야 공개 글 랜덤 답글** | 키워드 검색 (`threads_keyword_search`). 공개 검색은 고급 액세스/앱 리뷰 필요할 수 있음 |
 | **주제 알약** | 선택 주제 ×로 제거 · 인기 주제 자동완성으로 다시 추가 |
 
@@ -512,7 +513,7 @@ AutoThreads는 Threads 운영을 AI로 도와주는 데스크톱 앱입니다. �
 ### 첫 실행
 
 1. Settings에서 AI · Threads 토큰 연결 테스트  
-2. 토큰에 게시·답글·**멘션** 권한 포함 (권한 켠 **이후** 토큰 재발급)  
+2. 토큰에 게시·답글·**멘션** 권한 포함 (권한 켠 **이후** 토큰 재발급). 일반 사용자 멘션은 **Advanced Access** 필요  
 3. Auto에서 목표·분야·한도 설정, 실시간 뉴스 보이스 ON 권장  
 4. **실시간 게시 OFF(초안 전용)** → 저장 → 한 번 실행  
 5. 초안 검토 후 실시간 게시 ON → 시작  
@@ -552,7 +553,7 @@ npm run build
 npm start
 ```
 
-설치 파일 (macOS + Windows): [Releases](https://github.com/eisenjimmy/autoTHREADS/releases) (최신 **v0.2.12**)
+설치 파일 (macOS + Windows): [Releases](https://github.com/eisenjimmy/autoTHREADS/releases) (최신 **v0.2.13**)
 
 ## AI 설정
 
