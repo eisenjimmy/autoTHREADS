@@ -1,4 +1,12 @@
 import type { LlmSettings, TestResult } from './types'
+import { THREADS_POST_MAX_CHARS } from './types'
+
+/** Resolve configured max completion tokens (default = Threads post max chars). */
+function resolveMaxTokens(llm: LlmSettings): number {
+  const n = Math.round(Number(llm.maxTokens))
+  if (!Number.isFinite(n)) return THREADS_POST_MAX_CHARS
+  return Math.min(8192, Math.max(64, n))
+}
 
 /** LLM provider adapters: Anthropic Claude, OpenAI, Gemini, and
  *  OpenAI-compatible custom/local servers. */
@@ -236,7 +244,8 @@ export async function testLlm(llm: LlmSettings): Promise<TestResult> {
 async function generateClaude(
   cfg: LlmSettings['claude'],
   system: string,
-  user: string
+  user: string,
+  maxTokens: number
 ): Promise<string> {
   if (!cfg.apiKey.trim()) throw new Error('Anthropic API key is required')
   let res: HttpReply
@@ -250,11 +259,10 @@ async function generateClaude(
           'anthropic-version': ANTHROPIC_VERSION,
           'content-type': 'application/json',
         },
-        // No temperature: current Anthropic models reject non-default sampling
-        // params. 2048 tokens leaves headroom for models that think before answering.
+        // No temperature: current Anthropic models reject non-default sampling params.
         body: JSON.stringify({
           model: cfg.model,
-          max_tokens: 2048,
+          max_tokens: maxTokens,
           system,
           messages: [{ role: 'user', content: user }],
         }),
@@ -317,9 +325,10 @@ async function chatCompletion(
 }
 
 export async function generateText(llm: LlmSettings, system: string, user: string): Promise<string> {
+  const maxTokens = resolveMaxTokens(llm)
   switch (llm.provider) {
     case 'claude':
-      return generateClaude(llm.claude, system, user)
+      return generateClaude(llm.claude, system, user, maxTokens)
     case 'openai': {
       if (!llm.openai.apiKey.trim()) throw new Error('OpenAI API key is required')
       return chatCompletion(
@@ -329,7 +338,7 @@ export async function generateText(llm: LlmSettings, system: string, user: strin
         llm.openai.model,
         system,
         user,
-        { max_completion_tokens: 2048 }
+        { max_completion_tokens: maxTokens }
       )
     }
     case 'gemini': {
@@ -341,7 +350,7 @@ export async function generateText(llm: LlmSettings, system: string, user: strin
         llm.gemini.model,
         system,
         user,
-        { max_tokens: 1024, temperature: 0.8 }
+        { max_tokens: maxTokens, temperature: 0.8 }
       )
     }
     case 'local': {
@@ -357,7 +366,7 @@ export async function generateText(llm: LlmSettings, system: string, user: strin
         llm.local.model,
         system,
         user,
-        { max_tokens: 1024, temperature: 0.8 }
+        { max_tokens: maxTokens, temperature: 0.8 }
       )
     }
     case 'other': {
@@ -367,6 +376,11 @@ export async function generateText(llm: LlmSettings, system: string, user: strin
       if (invalid) throw new Error(`Other provider: ${invalid}`)
       const extraHeaders = parseHeadersJson(llm.other.headersJson)
       const bodyOverrides = parseJsonObject('Request JSON', llm.other.bodyJson)
+      // Inject max_tokens unless Request JSON already sets a completion limit.
+      const hasCap =
+        Object.prototype.hasOwnProperty.call(bodyOverrides, 'max_tokens') ||
+        Object.prototype.hasOwnProperty.call(bodyOverrides, 'max_completion_tokens')
+      const sampling: Json = hasCap ? bodyOverrides : { max_tokens: maxTokens, ...bodyOverrides }
       const apiKey = llm.other.apiKey.trim()
       return chatCompletion(
         'Other provider',
@@ -375,7 +389,7 @@ export async function generateText(llm: LlmSettings, system: string, user: strin
         llm.other.model,
         system,
         user,
-        bodyOverrides
+        sampling
       )
     }
   }

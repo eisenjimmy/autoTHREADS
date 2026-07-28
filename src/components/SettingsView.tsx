@@ -14,6 +14,7 @@ import type {
   ThreadsSettings,
   ViewId,
 } from '../types'
+import { THREADS_POST_MAX_CHARS } from '../types'
 import { snippet } from '../util/format'
 
 const LANGUAGES: { id: LanguageCode; label: string }[] = [
@@ -649,13 +650,46 @@ export default function SettingsView() {
                   />
                   <span className="hint">
                     {t(
-                      'Merged into the chat-completions body. Use for temperature, top_p, max_tokens, provider extras.',
-                      'chat-completions 본문에 병합됩니다. temperature, top_p, max_tokens 등에 사용하세요.'
+                      'Merged into the chat-completions body. Use for temperature, top_p, max_tokens, provider extras. If max_tokens is set here it overrides Max tokens below.',
+                      'chat-completions 본문에 병합됩니다. temperature, top_p, max_tokens 등. 여기 max_tokens가 있으면 아래 Max tokens보다 우선합니다.'
                     )}
                   </span>
                 </div>
               </>
             )}
+            <div className="field">
+              <span className="field-label">{t('Max tokens', '최대 토큰')}</span>
+              <input
+                className="input"
+                type="number"
+                min={64}
+                max={8192}
+                value={form.llm.maxTokens ?? THREADS_POST_MAX_CHARS}
+                onChange={(e) =>
+                  setLlm((l) => ({
+                    ...l,
+                    maxTokens: Number.isFinite(e.target.valueAsNumber)
+                      ? e.target.valueAsNumber
+                      : l.maxTokens,
+                  }))
+                }
+                onBlur={() =>
+                  setLlm((l) => {
+                    const n = Math.round(Number(l.maxTokens))
+                    const maxTokens = Number.isFinite(n)
+                      ? Math.min(8192, Math.max(64, n))
+                      : THREADS_POST_MAX_CHARS
+                    return { ...l, maxTokens }
+                  })
+                }
+              />
+              <span className="hint">
+                {t(
+                  'Completion length sent to the model. Default 500 matches the Threads post character limit so drafts stay post-sized. Raise for longer replies if needed (64–8192).',
+                  '모델에 보내는 생성 길이 한도입니다. 기본 500은 Threads 게시 글자 수 상한과 같아 초안이 게시물 크기에 맞게 유지됩니다. 필요하면 늘리세요 (64–8192).'
+                )}
+              </span>
+            </div>
             <div className="row">
               <button className="btn" disabled={testingLlm} onClick={() => void testLlm()}>
                 {testingLlm ? t('Testing…', '테스트 중…') : t('Test connection', '연결 테스트')}

@@ -7,8 +7,16 @@ export type LlmProviderKind = 'claude' | 'openai' | 'gemini' | 'local' | 'other'
 export type DraftKind = 'post' | 'reply'
 export type DraftStatus = 'draft' | 'scheduled' | 'posting' | 'posted' | 'failed'
 
+/** Threads text post character limit — default for LLM max_tokens as well. */
+export const THREADS_POST_MAX_CHARS = 500
+
 export interface LlmSettings {
   provider: LlmProviderKind
+  /**
+   * Max completion tokens sent to the model.
+   * Defaults to {@link THREADS_POST_MAX_CHARS} (500) so output stays in post-sized range.
+   */
+  maxTokens: number
   claude: { apiKey: string; model: string }
   openai: { apiKey: string; model: string }
   gemini: { apiKey: string; model: string }

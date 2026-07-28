@@ -1,6 +1,7 @@
 import { safeStorage } from 'electron'
 import { db } from './localdb'
 import type { AppSettings, AutopilotSettings, PostLanguageMode } from './types'
+import { THREADS_POST_MAX_CHARS } from './types'
 
 /**
  * Settings store. Secrets (API keys, Threads access token) are encrypted at
@@ -22,11 +23,19 @@ export function defaultSettings(): AppSettings {
     newsSources: { google: true, yahoo: false, hackerNews: true, naver: false, custom: [] },
     llm: {
       provider: 'local',
+      // Match Threads post length so completions stay post-sized by default.
+      maxTokens: THREADS_POST_MAX_CHARS,
       claude: { apiKey: '', model: 'claude-sonnet-5' },
       openai: { apiKey: '', model: 'gpt-4o-mini' },
       gemini: { apiKey: '', model: 'gemini-3.5-flash' },
       local: { baseUrl: 'http://127.0.0.1:8080/v1/chat/completions', model: 'gemma4-v2', apiKey: '' },
-      other: { baseUrl: '', model: '', apiKey: '', headersJson: '{}', bodyJson: '{\n  "max_tokens": 1024,\n  "temperature": 0.8\n}' },
+      other: {
+        baseUrl: '',
+        model: '',
+        apiKey: '',
+        headersJson: '{}',
+        bodyJson: `{\n  "max_tokens": ${THREADS_POST_MAX_CHARS},\n  "temperature": 0.8\n}`,
+      },
     },
     threads: {
       accessToken: '',
@@ -183,6 +192,7 @@ function normalize(raw: Partial<AppSettings> | null): AppSettings {
         raw.llm?.provider === 'other'
           ? raw.llm.provider
           : d.llm.provider,
+      maxTokens: clampInt(raw.llm?.maxTokens, 64, 8192, d.llm.maxTokens),
       claude: {
         apiKey: str(raw.llm?.claude?.apiKey, ''),
         model: str(raw.llm?.claude?.model, d.llm.claude.model) || d.llm.claude.model,
