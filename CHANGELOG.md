@@ -9,6 +9,16 @@ Session-level notes also live under `_changelog/`.
 
 ---
 
+## [0.2.9] — 2026-07-28
+
+### Added
+
+- **Removable topic pills** on Full-Auto — each selected niche has ×; re-add from popular chips, more niches, or search autocomplete (popular handles on focus).
+- **Activity log Korean** — when Settings language is 한국어, Full-Auto activity messages, kind labels, and relative timestamps are in Korean.
+- **Windows release assets** restored (NSIS installer + zip) — recent 0.2.x releases had been mac-only.
+
+---
+
 ## [0.2.8] — 2026-07-27
 
 ### Added

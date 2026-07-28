@@ -11,7 +11,7 @@ control, or hand the wheel to a self-running agent that posts and replies on its
 
 <br />
 
-![Version](https://img.shields.io/badge/version-0.2.8-111111?style=flat-square)
+![Version](https://img.shields.io/badge/version-0.2.9-111111?style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-111111?style=flat-square)
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-111111?style=flat-square)
 <br />
@@ -33,7 +33,7 @@ control, or hand the wheel to a self-running agent that posts and replies on its
 ---
 
 > [!TIP]
-> **Current release: v0.2.8.** Full-Auto now includes **live news + interactive voice**, dual
+> **Current release: v0.2.9.** Full-Auto now includes **live news + interactive voice**, dual
 > post/reply timers, @mentions, nested thread replies, sporadic posting, optional discover
 > engagement, anti-repeat memory, and **Settings fully bilingual EN/한국어**. See
 > [Full-Auto](#-full-auto-mode) and [CHANGELOG.md](CHANGELOG.md).
@@ -241,7 +241,7 @@ npm run package:win    # Windows
 npm run package:all    # both
 ```
 
-Prebuilt macOS DMGs/zips: [GitHub Releases](https://github.com/eisenjimmy/autoTHREADS/releases) (latest **v0.2.8**).
+Prebuilt macOS + Windows installers: [GitHub Releases](https://github.com/eisenjimmy/autoTHREADS/releases) (latest **v0.2.9**).
 
 > Apps are not notarized yet. On first open: right-click → **Open** (or allow under Privacy & Security).
 
@@ -548,7 +548,7 @@ npm run build
 npm start
 ```
 
-설치 파일: [Releases](https://github.com/eisenjimmy/autoTHREADS/releases) (최신 **v0.2.8**)
+설치 파일 (macOS + Windows): [Releases](https://github.com/eisenjimmy/autoTHREADS/releases) (최신 **v0.2.9**)
 
 ## AI 설정
 
