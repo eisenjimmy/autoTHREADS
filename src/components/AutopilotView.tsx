@@ -47,6 +47,7 @@ export default function AutopilotView() {
   const [saving, setSaving] = useState(false)
   const [launching, setLaunching] = useState(false)
   const [customCat, setCustomCat] = useState('')
+  const [topicInputFocused, setTopicInputFocused] = useState(false)
   const [now, setNow] = useState(Date.now())
 
   // Follow external config changes only while the form has no local edits.
@@ -118,25 +119,76 @@ export default function AutopilotView() {
     await runNow()
   }
 
-  const toggleCategory = (id: string) =>
-    edit({
-      categories: form.categories.includes(id)
-        ? form.categories.filter((c) => c !== id)
-        : [...form.categories, id],
-    })
+  const removeCategory = (id: string) =>
+    edit({ categories: form.categories.filter((c) => c !== id) })
+
+  const addCategory = (id: string) => {
+    const key = id.trim().toLowerCase()
+    if (!key) return
+    if (!form.categories.includes(key)) edit({ categories: [...form.categories, key] })
+  }
+
+  const toggleCategory = (id: string) => {
+    if (form.categories.includes(id)) removeCategory(id)
+    else addCategory(id)
+  }
 
   const selectPopular = () => edit({ categories: [...AUTOPILOT_DEFAULT_CATEGORIES] })
   const selectAllPopular = () => edit({ categories: [...AUTOPILOT_POPULAR_CATEGORY_IDS] })
+  const clearCategories = () => edit({ categories: [] })
 
-  const addCustomCat = () => {
-    const c = customCat.trim().toLowerCase()
-    if (!c) return
-    if (!form.categories.includes(c)) edit({ categories: [...form.categories, c] })
+  /** Resolve typed text to a catalog id (en/ko label or raw id) or a custom slug. */
+  const resolveCatalogId = (raw: string): string | null => {
+    const q = raw.trim()
+    if (!q) return null
+    const lower = q.toLowerCase()
+    const byId = AUTOPILOT_CATEGORIES.find((c) => c.id === lower)
+    if (byId) return byId.id
+    const byLabel = AUTOPILOT_CATEGORIES.find(
+      (c) => c.en.toLowerCase() === lower || c.ko.toLowerCase() === lower
+    )
+    if (byLabel) return byLabel.id
+    // fuzzy: starts-with match for autocomplete commit
+    const starts = AUTOPILOT_CATEGORIES.filter(
+      (c) =>
+        c.id.startsWith(lower) ||
+        c.en.toLowerCase().startsWith(lower) ||
+        c.ko.startsWith(q)
+    )
+    if (starts.length === 1) return starts[0].id
+    return lower.replace(/\s+/g, ' ')
+  }
+
+  const addFromInput = () => {
+    const id = resolveCatalogId(customCat)
+    if (!id) return
+    addCategory(id)
     setCustomCat('')
+  }
+
+  const labelForCategory = (id: string): string => {
+    const cat = AUTOPILOT_CATEGORIES.find((c) => c.id === id)
+    if (!cat) return id
+    return ko ? cat.ko : cat.en
   }
 
   const popularCats = AUTOPILOT_CATEGORIES.filter((c) => c.popular)
   const moreCats = AUTOPILOT_CATEGORIES.filter((c) => !c.popular)
+  const selectedSet = new Set(form.categories)
+  // Autocomplete suggestions: popular first, then rest, only not-yet-selected, filter by query
+  const query = customCat.trim().toLowerCase()
+  const autocompletePool = [
+    ...popularCats,
+    ...moreCats,
+  ].filter((c) => {
+    if (selectedSet.has(c.id)) return false
+    if (!query) return c.popular // empty field: show popular handles only
+    return (
+      c.id.includes(query) ||
+      c.en.toLowerCase().includes(query) ||
+      c.ko.includes(customCat.trim())
+    )
+  })
 
   const formatCountdown = (at: number | null | undefined): string => {
     if (!running) return t('Paused', '일시정지')
@@ -287,8 +339,8 @@ export default function AutopilotView() {
             <div className="section-title">{t('Topics / niches', '주제 / 분야')}</div>
             <div className="section-desc">
               {t(
-                'What the agent posts about. Popular Threads niches (AI, tech, builders…) are listed first — the agent writes in that niche’s native voice.',
-                '에이전트가 다룰 주제입니다. Threads에서 잘 되는 인기 분야(AI, 기술, 빌더 등)를 먼저 보여 주며, 해당 분야 톤으로 글을 씁니다.'
+                'Selected niches drive news scrapes and post voice. Remove any pill with × — re-add from suggestions or type to search popular topics.',
+                '선택한 분야가 뉴스 수집과 글 톤을 결정합니다. 알약의 ×로 제거한 뒤, 추천에서 다시 고르거나 인기 주제를 검색해 추가하세요.'
               )}
             </div>
             <div className="row" style={{ marginBottom: 8, gap: 8, flexWrap: 'wrap' }}>
@@ -298,59 +350,155 @@ export default function AutopilotView() {
               <button className="btn" onClick={selectAllPopular} type="button">
                 {t('Select all popular', '인기 분야 전체 선택')}
               </button>
+              <button
+                className="btn ghost"
+                onClick={clearCategories}
+                type="button"
+                disabled={form.categories.length === 0}
+              >
+                {t('Clear all', '모두 지우기')}
+              </button>
             </div>
-            <div className="ap-cat-group-label">{t('Popular on Threads', 'Threads 인기 분야')}</div>
+
+            <div className="ap-cat-group-label">{t('Selected', '선택됨')}</div>
+            <div className="row ap-chips ap-selected-chips">
+              {form.categories.length === 0 && (
+                <span className="hint">
+                  {t(
+                    'No niches selected. Add popular ones below or type a custom topic.',
+                    '선택된 분야가 없습니다. 아래에서 인기 주제를 추가하거나 직접 입력하세요.'
+                  )}
+                </span>
+              )}
+              {form.categories.map((id) => {
+                const isPopular = AUTOPILOT_CATEGORIES.some((c) => c.id === id && c.popular)
+                const isCatalog = AUTOPILOT_CATEGORIES.some((c) => c.id === id)
+                return (
+                  <span
+                    key={id}
+                    className={`chip on removable${isPopular ? ' popular' : ''}${!isCatalog ? ' custom' : ''}`}
+                  >
+                    <span className="chip-label">{labelForCategory(id)}</span>
+                    <button
+                      type="button"
+                      className="chip-x"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        removeCategory(id)
+                      }}
+                      aria-label={t(`Remove ${labelForCategory(id)}`, `${labelForCategory(id)} 제거`)}
+                      title={t('Remove', '제거')}
+                    >
+                      ×
+                    </button>
+                  </span>
+                )
+              })}
+            </div>
+
+            <div className="ap-cat-group-label" style={{ marginTop: 14 }}>
+              {t('Add popular topics', '인기 주제 추가')}
+            </div>
             <div className="row ap-chips">
-              {popularCats.map((c) => (
-                <button
-                  key={c.id}
-                  className={`chip selectable popular${form.categories.includes(c.id) ? ' on' : ''}`}
-                  onClick={() => toggleCategory(c.id)}
-                >
-                  {ko ? c.ko : c.en}
-                </button>
-              ))}
+              {popularCats
+                .filter((c) => !selectedSet.has(c.id))
+                .map((c) => (
+                  <button
+                    key={c.id}
+                    type="button"
+                    className="chip selectable popular"
+                    onClick={() => addCategory(c.id)}
+                    title={t('Click to add', '클릭하여 추가')}
+                  >
+                    + {ko ? c.ko : c.en}
+                  </button>
+                ))}
+              {popularCats.every((c) => selectedSet.has(c.id)) && (
+                <span className="hint">{t('All popular niches are selected.', '인기 분야가 모두 선택되었습니다.')}</span>
+              )}
             </div>
+
             <div className="ap-cat-group-label" style={{ marginTop: 12 }}>
               {t('More niches', '기타 분야')}
             </div>
             <div className="row ap-chips">
-              {moreCats.map((c) => (
-                <button
-                  key={c.id}
-                  className={`chip selectable${form.categories.includes(c.id) ? ' on' : ''}`}
-                  onClick={() => toggleCategory(c.id)}
-                >
-                  {ko ? c.ko : c.en}
-                </button>
-              ))}
-              {form.categories
-                .filter((c) => !AUTOPILOT_CATEGORIES.some((p) => p.id === c))
+              {moreCats
+                .filter((c) => !selectedSet.has(c.id))
                 .map((c) => (
-                  <span key={c} className="chip on">
-                    {c}
-                    <button className="chip-x" onClick={() => toggleCategory(c)} aria-label={`Remove ${c}`}>
-                      ×
-                    </button>
-                  </span>
+                  <button
+                    key={c.id}
+                    type="button"
+                    className="chip selectable"
+                    onClick={() => addCategory(c.id)}
+                    title={t('Click to add', '클릭하여 추가')}
+                  >
+                    + {ko ? c.ko : c.en}
+                  </button>
                 ))}
             </div>
-            <div className="row" style={{ marginTop: 8 }}>
-              <input
-                className="input grow"
-                placeholder={t('Add a custom topic', '직접 주제 추가')}
-                value={customCat}
-                onChange={(e) => setCustomCat(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault()
-                    addCustomCat()
-                  }
-                }}
-              />
-              <button className="btn" onClick={addCustomCat}>
-                {t('Add', '추가')}
-              </button>
+
+            <div className="ap-cat-group-label" style={{ marginTop: 12 }}>
+              {t('Search or custom topic', '검색 · 직접 입력')}
+            </div>
+            <div className="ap-autocomplete">
+              <div className="row">
+                <input
+                  className="input grow"
+                  list="ap-topic-suggestions"
+                  placeholder={t(
+                    'Type to search popular topics or add custom…',
+                    '인기 주제 검색 또는 직접 추가…'
+                  )}
+                  value={customCat}
+                  onChange={(e) => setCustomCat(e.target.value)}
+                  onFocus={() => setTopicInputFocused(true)}
+                  onBlur={() => {
+                    // delay so click on a suggestion still registers
+                    window.setTimeout(() => setTopicInputFocused(false), 150)
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                      addFromInput()
+                    }
+                    if (e.key === 'Escape') {
+                      setCustomCat('')
+                      ;(e.target as HTMLInputElement).blur()
+                    }
+                  }}
+                  autoComplete="off"
+                />
+                <datalist id="ap-topic-suggestions">
+                  {AUTOPILOT_CATEGORIES.filter((c) => !selectedSet.has(c.id)).map((c) => (
+                    <option key={c.id} value={ko ? c.ko : c.en} />
+                  ))}
+                </datalist>
+                <button className="btn" type="button" onClick={addFromInput} disabled={!customCat.trim()}>
+                  {t('Add', '추가')}
+                </button>
+              </div>
+              {/* Autopopulate: focus empty field → popular handles; typing filters full catalog */}
+              {topicInputFocused && autocompletePool.length > 0 && (
+                <div className="ap-suggest-list" role="listbox">
+                  {autocompletePool.slice(0, query ? 8 : 10).map((c) => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      className={`ap-suggest-item${c.popular ? ' popular' : ''}`}
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => {
+                        addCategory(c.id)
+                        setCustomCat('')
+                      }}
+                    >
+                      <span>{ko ? c.ko : c.en}</span>
+                      {c.popular && (
+                        <span className="ap-suggest-badge">{t('popular', '인기')}</span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 
