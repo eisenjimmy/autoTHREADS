@@ -6,7 +6,13 @@ import { allDrafts, upsertDraft } from './drafts'
 import { scrapeRecentTexts } from './threadsApi'
 import type { AppSettings, GenerateResult, LanguageCode, PostLanguageMode, StyleSettings } from './types'
 
-const MAX_CHARS = 500
+import {
+  THREADS_MAX_CHARS,
+  THREADS_MAX_PARTS,
+  THREADS_MAX_THREAD_CHARS,
+} from './threadSplit'
+
+const MAX_CHARS = THREADS_MAX_CHARS
 const USED_LINKS_KEY = 'usedNewsLinks'
 const TOPIC_IDX_KEY = 'autoDraftTopicIdx'
 /** Default when settings omit recentPostMemory (keep in sync with defaultAutopilot). */
@@ -193,7 +199,7 @@ function buildSystemPrompt(style: StyleSettings): string {
   return lines.join('\n')
 }
 
-function cleanOutput(raw: string): string {
+function cleanOutput(raw: string, maxLen = MAX_CHARS): string {
   let text = raw.trim()
   for (const [open, close] of [['"', '"'], ["'", "'"], ['“', '”'], ['‘', '’']] as const) {
     if (text.length >= 2 && text.startsWith(open) && text.endsWith(close)) {
@@ -202,9 +208,11 @@ function cleanOutput(raw: string): string {
     }
   }
   text = text.replace(/^(?:post|reply)\s*:\s*/i, '')
+  // Strip model-added thread labels; we add 1/n ourselves at publish.
+  text = text.replace(/^\s*\d+\s*\/\s*\d+\s*[:.\-)]?\s*/gm, '')
   text = text.replace(/\n{3,}/g, '\n\n').trim()
-  if (text.length > MAX_CHARS) {
-    const head = text.slice(0, MAX_CHARS - 3)
+  if (text.length > maxLen) {
+    const head = text.slice(0, maxLen - 3)
     const atBoundary = head.replace(/\s+\S*$/, '').trimEnd()
     text = (atBoundary || head) + '…'
   }
@@ -213,35 +221,35 @@ function cleanOutput(raw: string): string {
 
 /**
  * Append the news source URL to a post body when missing.
- * Deterministic — do not rely on the model remembering the link.
- * Truncates the body first so the full URL always fits within MAX_CHARS.
+ * Allows multi-part thread length (link lands on the final segment after split).
  */
-export function withNewsSourceLink(text: string, url?: string | null): string {
+export function withNewsSourceLink(
+  text: string,
+  url?: string | null,
+  maxLen = THREADS_MAX_THREAD_CHARS
+): string {
   const link = (url ?? '').trim()
   if (!link || !/^https?:\/\//i.test(link)) return text
   const body = text.trim()
-  if (!body) return link.slice(0, MAX_CHARS)
-  // Already present (full URL or trailing path match).
-  if (body.includes(link) || body.toLowerCase().includes(link.toLowerCase())) return body.slice(0, MAX_CHARS)
+  if (!body) return link.slice(0, maxLen)
+  if (body.includes(link) || body.toLowerCase().includes(link.toLowerCase())) return body.slice(0, maxLen)
   const suffix = `\n\n${link}`
-  const maxBody = MAX_CHARS - suffix.length
-  if (maxBody < 20) {
-    // Extremely long URL edge case — still prefer showing the link.
-    return link.slice(0, MAX_CHARS)
-  }
+  const maxBody = maxLen - suffix.length
+  if (maxBody < 20) return link.slice(0, maxLen)
   let head = body
   if (head.length > maxBody) {
     const cut = head.slice(0, maxBody - 1)
     const atBoundary = cut.replace(/\s+\S*$/, '').trimEnd()
     head = (atBoundary || cut).trimEnd() + '…'
   }
-  return (head + suffix).slice(0, MAX_CHARS)
+  return (head + suffix).slice(0, maxLen)
 }
 
 async function runGeneration(
   settings: AppSettings,
   userPrompt: string,
-  systemPrompt?: string
+  systemPrompt?: string,
+  maxLen = MAX_CHARS
 ): Promise<GenerateResult> {
   try {
     const raw = await generateText(
@@ -249,7 +257,7 @@ async function runGeneration(
       systemPrompt ?? buildSystemPrompt(settings.style),
       userPrompt
     )
-    const text = cleanOutput(raw)
+    const text = cleanOutput(raw, maxLen)
     if (!text) return { ok: false, text: '', message: 'Model returned empty text' }
     return { ok: true, text, message: '' }
   } catch (err) {
@@ -276,9 +284,17 @@ export async function generatePostDraft(input: {
         ` you may omit the link from your draft).`
     }
   }
-  const result = await runGeneration(settings, user)
+  const result = await runGeneration(
+    settings,
+    user,
+    undefined,
+    THREADS_MAX_THREAD_CHARS
+  )
   if (!result.ok) return result
-  return { ...result, text: withNewsSourceLink(result.text, input.newsUrl) }
+  return {
+    ...result,
+    text: withNewsSourceLink(result.text, input.newsUrl, THREADS_MAX_THREAD_CHARS),
+  }
 }
 
 export async function generateReplyDraft(input: {
@@ -446,7 +462,17 @@ function buildPersonaPrompt(settings: AppSettings, kind: 'post' | 'reply', categ
   const niches = ap.categories.length > 0 ? ap.categories.join(', ') : 'ai, technology, startups'
   lines.push(`Your main niches on Threads: ${niches}. Lean into what performs in those categories.`)
   lines.push('Voice & rules:')
-  lines.push(`- Maximum ${MAX_CHARS} characters. Aim for 1-3 short, punchy sentences.`)
+  if (kind === 'post') {
+    lines.push(
+      `- Prefer a single punchy post under ${MAX_CHARS} characters (1–3 short sentences).`
+    )
+    lines.push(
+      `- If the idea truly needs more room, write ONE continuous piece up to ~${THREADS_MAX_THREAD_CHARS} characters. ` +
+        `Do NOT add "1/3" labels yourself — the app will split into a numbered thread (1/${THREADS_MAX_PARTS} style) at publish time.`
+    )
+  } else {
+    lines.push(`- Maximum ${MAX_CHARS} characters. Aim for 1-3 short, punchy sentences.`)
+  }
   lines.push('- Sound like a witty, warm human on Threads today — casual, specific, a little funny. NEVER corporate, robotic, or like a news anchor.')
   lines.push('- Match the energy of popular posts in your niche (especially AI/tech Threads): hooks, opinions, "just tried", questions — not press-release summaries.')
   lines.push('- Hook fast and invite engagement: a question, a hot take, or a relatable moment people want to reply to.')
@@ -558,7 +584,12 @@ export async function generateAutopilotPost(input: AutopilotPostInput): Promise<
   parts.push(recent.promptBlock)
   parts.push(languageDirective(ap.postLanguage, settings.language, hasReference || input.kind === 'reflection'))
 
-  let result = await runGeneration(settings, parts.join(' '), buildPersonaPrompt(settings, 'post', niche))
+  let result = await runGeneration(
+    settings,
+    parts.join(' '),
+    buildPersonaPrompt(settings, 'post', niche),
+    THREADS_MAX_THREAD_CHARS
+  )
   // One forced rewrite if the model echoed a recent post.
   if (result.ok && recent.texts.some((t) => postsTooSimilar(result.text, t))) {
     const retryParts = [
@@ -568,13 +599,17 @@ export async function generateAutopilotPost(input: AutopilotPostInput): Promise<
     const retry = await runGeneration(
       settings,
       retryParts.join(' '),
-      buildPersonaPrompt(settings, 'post', niche)
+      buildPersonaPrompt(settings, 'post', niche),
+      THREADS_MAX_THREAD_CHARS
     )
     if (retry.ok) result = retry
   }
-  // News posts always carry the source URL in the body (deterministic append).
+  // News posts always carry the source URL in the body (deterministic append; last segment after split).
   if (result.ok && hasReference && input.newsUrl) {
-    result = { ...result, text: withNewsSourceLink(result.text, input.newsUrl) }
+    result = {
+      ...result,
+      text: withNewsSourceLink(result.text, input.newsUrl, THREADS_MAX_THREAD_CHARS),
+    }
   }
   return result
 }

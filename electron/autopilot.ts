@@ -514,16 +514,30 @@ async function runPostPhase(
     const res = await commitDraft(draft, ap.goLive)
     if (cand?.link) markUsedLink(cand.link)
     const preview = gen.text.length > 60 ? gen.text.slice(0, 59) + '…' : gen.text
+    const longNote =
+      gen.text.length > 500
+        ? tLog(
+            ` (${Math.ceil(gen.text.length / 500)}-part thread if live)`,
+            ` (실시간 시 약 ${Math.ceil(gen.text.length / 500)}단 스레드)`
+          )
+        : ''
     if (!ap.goLive) {
       created++
       sessionTexts.unshift(gen.text)
       void db.set(AP_POSTS, postsToday + created)
-      log('post', tLog(`Drafted (review): ${preview}`, `초안 작성 (검토): ${preview}`))
+      log(
+        'post',
+        tLog(`Drafted (review): ${preview}${longNote}`, `초안 작성 (검토): ${preview}${longNote}`)
+      )
     } else if (res.ok) {
       created++
       sessionTexts.unshift(gen.text)
       void db.set(AP_POSTS, postsToday + created)
-      log('post', tLog(`Posted: ${preview}`, `게시됨: ${preview}`), res.permalink)
+      log(
+        'post',
+        tLog(`Posted: ${preview}${longNote}`, `게시됨: ${preview}${longNote}`),
+        res.permalink
+      )
     } else {
       log('error', tLog(`Publish failed: ${res.message}`, `게시 실패: ${res.message}`))
       await scheduleRetry('post')
