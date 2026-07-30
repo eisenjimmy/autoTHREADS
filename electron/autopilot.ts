@@ -352,13 +352,23 @@ async function runPostPhase(
   }
 
   // Know what she already posted — avoid repeating the same topic/angle.
-  const recent = await collectRecentPostMemory(15)
+  const memoryN = Math.max(1, Math.min(20, Math.round(ap.recentPostMemory) || 5))
+  if (!ap.goLive) {
+    log(
+      'info',
+      tLog(
+        'Publish live is OFF — this post tick will draft only (review in Drafts).',
+        '실시간 게시가 꺼져 있습니다 — 이번 게시 틱은 초안만 작성합니다 (초안 탭에서 검토).'
+      )
+    )
+  }
+  const recent = await collectRecentPostMemory(memoryN)
   if (recent.texts.length > 0) {
     log(
       'info',
       tLog(
-        `Loaded ${recent.texts.length} recent post(s) for anti-repeat memory.`,
-        `반복 방지를 위해 최근 게시 ${recent.texts.length}개를 불러왔습니다.`
+        `Loaded ${recent.texts.length}/${memoryN} recent post(s) for anti-repeat memory.`,
+        `반복 방지 메모리: 최근 게시 ${recent.texts.length}/${memoryN}개 로드.`
       )
     )
   }

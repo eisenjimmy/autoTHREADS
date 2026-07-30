@@ -9,7 +9,8 @@ import type { AppSettings, GenerateResult, LanguageCode, PostLanguageMode, Style
 const MAX_CHARS = 500
 const USED_LINKS_KEY = 'usedNewsLinks'
 const TOPIC_IDX_KEY = 'autoDraftTopicIdx'
-const RECENT_MEMORY_LIMIT = 15
+/** Default when settings omit recentPostMemory (keep in sync with defaultAutopilot). */
+const RECENT_MEMORY_LIMIT = 5
 
 /** What the account has been posting about — used to avoid repeats + interactive callbacks. */
 export type RecentPostMemory = {
@@ -71,17 +72,18 @@ export function collectLocalRecentPosts(limit = RECENT_MEMORY_LIMIT): RecentPost
   const recentReplies = buildRecentReplyLines()
 
   const lines: string[] = []
-  drafts.slice(0, 12).forEach((d, i) => {
+  drafts.forEach((d, i) => {
     const topic = d.topic ? ` [${d.topic}]` : ''
     const head = d.sourceTitle ? ` · news: ${d.sourceTitle.slice(0, 80)}` : ''
     const preview = d.text.replace(/\s+/g, ' ').trim().slice(0, 140)
     lines.push(`${i + 1}.${topic}${head}\n   "${preview}${d.text.length > 140 ? '…' : ''}"`)
   })
 
+  const replyCap = Math.min(4, Math.max(2, Math.ceil(limit / 2)))
   const replyBlock =
     recentReplies.length > 0
       ? `\nRECENT REPLIES (use for interactive callbacks / feelings, not to re-argue):\n${recentReplies
-          .slice(0, 6)
+          .slice(0, replyCap)
           .map((r, i) => `${i + 1}. ${r}`)
           .join('\n')}`
       : ''
@@ -100,13 +102,15 @@ export function collectLocalRecentPosts(limit = RECENT_MEMORY_LIMIT): RecentPost
 
 /** Merge local drafts with live Threads posts when a token is available. */
 export async function collectRecentPostMemory(limit = RECENT_MEMORY_LIMIT): Promise<RecentPostMemory> {
-  const local = collectLocalRecentPosts(limit)
+  const cap = Math.max(1, Math.min(20, Math.floor(limit) || RECENT_MEMORY_LIMIT))
+  const local = collectLocalRecentPosts(cap)
   const settings = getSettings()
   if (!settings.threads.accessToken) return local
   try {
+    // Scrape only what we need for the memory window (was hard-coded 10–15).
     const live = await scrapeRecentTexts(
       { accessToken: settings.threads.accessToken, userId: settings.threads.userId },
-      10
+      cap
     )
     const texts = [...local.texts]
     for (const t of live) {
@@ -115,25 +119,28 @@ export async function collectRecentPostMemory(limit = RECENT_MEMORY_LIMIT): Prom
       if (texts.some((x) => postsTooSimilar(x, trimmed) || x === trimmed)) continue
       texts.push(trimmed)
     }
-    const lines = texts.slice(0, 12).map((t, i) => {
+    const lines = texts.slice(0, cap).map((t, i) => {
       const preview = t.replace(/\s+/g, ' ').trim().slice(0, 140)
       return `${i + 1}. "${preview}${t.length > 140 ? '…' : ''}"`
     })
+    const replyCap = Math.min(4, Math.max(2, Math.ceil(cap / 2)))
     const replyBlock =
       local.recentReplies.length > 0
         ? `\nRECENT REPLIES:\n${local.recentReplies
-            .slice(0, 6)
+            .slice(0, replyCap)
             .map((r, i) => `${i + 1}. ${r}`)
             .join('\n')}`
         : ''
+    const topicCap = Math.min(cap, 8)
+    const headCap = Math.min(cap, 5)
     return {
-      texts: texts.slice(0, limit),
+      texts: texts.slice(0, cap),
       topics: local.topics,
       headlines: local.headlines,
       recentReplies: local.recentReplies,
       promptBlock:
         lines.length > 0
-          ? `RECENT POSTS from this account (do NOT repeat these topics, angles, or near-duplicate wording):\n${lines.join('\n')}\nAlso avoid reusing these recent topics/categories: ${[...new Set(local.topics)].slice(0, 10).join(', ') || '(none)'}\nAlso avoid these headlines already covered: ${local.headlines.slice(0, 8).join(' | ') || '(none)'}${replyBlock}`
+          ? `RECENT POSTS from this account (do NOT repeat these topics, angles, or near-duplicate wording):\n${lines.join('\n')}\nAlso avoid reusing these recent topics/categories: ${[...new Set(local.topics)].slice(0, topicCap).join(', ') || '(none)'}\nAlso avoid these headlines already covered: ${local.headlines.slice(0, headCap).join(' | ') || '(none)'}${replyBlock}`
           : local.promptBlock,
     }
   } catch {

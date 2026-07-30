@@ -84,6 +84,7 @@ export function defaultAutopilot(): AutopilotSettings {
     engageDiscover: false, // opt-in: reply to random public posts in niches
     maxDiscoverRepliesPerRun: 2,
     maxDiscoverRepliesPerDay: 20,
+    recentPostMemory: 5, // anti-repeat + plan context (lower = fewer tokens)
   }
 }
 
@@ -292,6 +293,7 @@ function normalizeAutopilot(
     engageDiscover: typeof r.engageDiscover === 'boolean' ? r.engageDiscover : d.engageDiscover,
     maxDiscoverRepliesPerRun: clampInt(r.maxDiscoverRepliesPerRun, 0, 10, d.maxDiscoverRepliesPerRun),
     maxDiscoverRepliesPerDay: clampInt(r.maxDiscoverRepliesPerDay, 0, 100, d.maxDiscoverRepliesPerDay),
+    recentPostMemory: clampInt(r.recentPostMemory, 1, 20, d.recentPostMemory),
   }
 }
 

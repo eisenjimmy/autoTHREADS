@@ -75,6 +75,11 @@ export interface AutopilotSettings {
   engageDiscover: boolean
   maxDiscoverRepliesPerRun: number
   maxDiscoverRepliesPerDay: number
+  /**
+   * How many recent posts to load for anti-repeat + planning context (saves tokens).
+   * Default 5; was hard-coded 15.
+   */
+  recentPostMemory: number
 }
 
 export type AutopilotLogKind = 'post' | 'reply' | 'skip' | 'error' | 'info'

@@ -40,6 +40,10 @@ export default function AutopilotView() {
       typeof ap.maxDiscoverRepliesPerDay === 'number' && Number.isFinite(ap.maxDiscoverRepliesPerDay)
         ? ap.maxDiscoverRepliesPerDay
         : 20,
+    recentPostMemory:
+      typeof ap.recentPostMemory === 'number' && Number.isFinite(ap.recentPostMemory)
+        ? ap.recentPostMemory
+        : 5,
   })
 
   const [form, setForm] = useState<AutopilotSettings>(() => withReplyDefaults(settings.autopilot))
@@ -586,8 +590,8 @@ export default function AutopilotView() {
             <div className="section-title">{t('Cadence & limits', '주기 & 한도')}</div>
             <div className="section-desc">
               {t(
-                'Post planning and reply/mention checks run on separate timers so replies can be faster without posting more often.',
-                '게시 판단과 답글·멘션 확인은 서로 다른 주기로 동작합니다. 게시를 늘리지 않고도 답글을 더 자주 처리할 수 있습니다.'
+                'Post planning and reply/mention checks run on separate timers so replies can be faster without posting more often. The activity log often shows only reply ticks (every few min); post ticks run on the longer post timer — that is not a skip.',
+                '게시 판단과 답글·멘션 확인은 서로 다른 주기로 동작합니다. 활동 로그에 답글 틱만 자주 보이는 것은 정상입니다(답글 주기가 더 짧음). 게시 틱은 게시 주기에 맞춰 돌며, 그게 건너뛰기가 아닙니다.'
               )}
             </div>
             <div className="row">
@@ -614,6 +618,24 @@ export default function AutopilotView() {
                   onChange={(e) => edit({ maxPostsPerRun: e.target.valueAsNumber })}
                   onBlur={() => edit({ maxPostsPerRun: num(form.maxPostsPerRun, 1, 10, 1) })}
                 />
+              </div>
+              <div className="field grow">
+                <span className="field-label">{t('Recent posts memory', '최근 게시 기억')}</span>
+                <input
+                  className="input"
+                  type="number"
+                  min={1}
+                  max={20}
+                  value={form.recentPostMemory}
+                  onChange={(e) => edit({ recentPostMemory: e.target.valueAsNumber })}
+                  onBlur={() => edit({ recentPostMemory: num(form.recentPostMemory, 1, 20, 5) })}
+                />
+                <span className="hint">
+                  {t(
+                    'How many past posts to load for anti-repeat (scraped + drafts). Lower uses fewer LLM tokens. Default 5.',
+                    '반복 방지용으로 불러올 최근 게시 수(스크랩+초안). 낮을수록 LLM 토큰 절약. 기본 5.'
+                  )}
+                </span>
               </div>
               <div className="field grow">
                 <span className="field-label">{t('Max posts / day', '하루 최대 게시')}</span>
