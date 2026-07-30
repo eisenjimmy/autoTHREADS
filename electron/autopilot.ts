@@ -6,6 +6,7 @@ import {
   MAX_UNANSWERED_REPLIES_PER_THREAD,
   searchKeywordPosts,
 } from './threadsApi'
+import { isLocalVisionDisabled, localVisionDisabledMessage } from './llm'
 import { allDrafts, upsertDraft } from './drafts'
 import { postDraftNow } from './scheduler'
 import {
@@ -789,13 +790,23 @@ async function runReplyPhase(repliesToday: number): Promise<number> {
     const contextText = await fetchReplyContext(r.text, r.rootPostText)
     const imageUrls = Array.isArray(r.imageUrls) ? r.imageUrls : undefined
     if (imageUrls && imageUrls.length > 0) {
+      const local = settings.llm.provider === 'local'
+      const visionOff = local && isLocalVisionDisabled()
       log(
         'info',
         tLog(
           `Vision: ${imageUrls.length} image(s) on @${r.username}'s ${isMention ? 'mention' : 'reply'}` +
-            (settings.llm.provider === 'local' ? ' (sending to local model).' : ' (text-only — vision is Local LLM only).'),
+            (visionOff
+              ? ` (text-only fallback — server needs mmproj: ${localVisionDisabledMessage() ?? 'unsupported'}).`
+              : local
+                ? ' (sending to local model; falls back to text if server rejects vision).'
+                : ' (text-only — vision is Local LLM only).'),
           `비전: @${r.username} ${isMention ? '멘션' : '답글'}에 이미지 ${imageUrls.length}개` +
-            (settings.llm.provider === 'local' ? ' (로컬 모델로 전달).' : ' (텍스트만 — 비전은 로컬 LLM 전용).')
+            (visionOff
+              ? ' (텍스트 폴백 — 서버에 mmproj 필요).'
+              : local
+                ? ' (로컬 모델로 전달, 거부 시 텍스트 폴백).'
+                : ' (텍스트만 — 비전은 로컬 LLM 전용).')
         )
       )
     }

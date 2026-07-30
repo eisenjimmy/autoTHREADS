@@ -9,6 +9,20 @@ Session-level notes also live under `_changelog/`.
 
 ---
 
+## [0.2.16] — 2026-07-30
+
+### Fixed
+
+- **Image replies no longer hard-fail** when the local server rejects vision (`image input is not supported` / missing **mmproj**). AutoThreads falls back to **text-only** for the rest of the session and keeps answering.
+- Clear activity-log note when vision is disabled; strip trailing junk from local model names (e.g. `gemma4-v2.`).
+- Stronger image download headers for Threads/CDN URLs.
+
+### Notes
+
+- True vision still needs a multimodal local stack (e.g. llama.cpp with matching `--mmproj`). Without it, replies use text only.
+
+---
+
 ## [0.2.15] — 2026-07-30
 
 ### Added
@@ -17,10 +31,15 @@ Session-level notes also live under `_changelog/`.
 - **Current date/time in system prompts** — persona, planner, and draft prompts include a localized “now” string for timely posts/replies.
 - Replies page shows an **image ×N** badge when media is present.
 
+### Fixed
+
+- **Vision without mmproj** — if the local server rejects images (`image input is not supported` / missing `--mmproj`), AutoThreads automatically retries **text-only** so reply generation no longer hard-fails (HTTP 500).
+
 ### Notes
 
 - Image-only replies are kept (text becomes a short placeholder).
 - Up to 3 images per engagement; ~4 MB max per download.
+- To actually *see* images, run llama-server (or equivalent) with a multimodal GGUF **and** matching `--mmproj` file.
 
 ---
 

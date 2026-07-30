@@ -288,9 +288,20 @@ type ChatContentPart =
   | { type: 'text'; text: string }
   | { type: 'image_url'; image_url: { url: string } }
 
-const IMAGE_FETCH_TIMEOUT_MS = 20_000
+const IMAGE_FETCH_TIMEOUT_MS = 25_000
 const MAX_VISION_IMAGES = 3
-const MAX_IMAGE_BYTES = 4 * 1024 * 1024 // 4MB per image before skip
+const MAX_IMAGE_BYTES = 6 * 1024 * 1024 // 6MB per image
+
+/**
+ * After llama.cpp returns "image input is not supported / mmproj", skip vision
+ * for the rest of this process so we don't fail every image reply.
+ */
+let localVisionDisabledReason: string | null = null
+
+/** Clean model ids like "gemma4-v2." that some UIs leave with trailing junk. */
+function cleanModelId(model: string): string {
+  return model.trim().replace(/[.\s]+$/g, '').trim()
+}
 
 /**
  * Download a remote image and return a data: URL for local vision models.
@@ -305,15 +316,26 @@ async function fetchImageAsDataUrl(url: string): Promise<string | null> {
   try {
     const res = await fetch(u, {
       signal: controller.signal,
-      headers: { 'User-Agent': 'AutoThreads/1.0 (vision)' },
+      headers: {
+        // Threads/CDN often want a browser-like UA.
+        'User-Agent':
+          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+        Accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+      },
+      redirect: 'follow',
     })
-    if (!res.ok) return null
+    if (!res.ok) {
+      console.warn(`[llm] image fetch HTTP ${res.status} for ${u.slice(0, 80)}`)
+      return null
+    }
     const buf = Buffer.from(await res.arrayBuffer())
-    if (buf.byteLength === 0 || buf.byteLength > MAX_IMAGE_BYTES) return null
+    if (buf.byteLength === 0 || buf.byteLength > MAX_IMAGE_BYTES) {
+      console.warn(`[llm] image skip size=${buf.byteLength} for ${u.slice(0, 80)}`)
+      return null
+    }
     const ctHeader = (res.headers.get('content-type') || '').split(';')[0].trim().toLowerCase()
     let mime = ctHeader.startsWith('image/') ? ctHeader : ''
     if (!mime) {
-      // Guess from magic bytes / URL.
       if (buf[0] === 0xff && buf[1] === 0xd8) mime = 'image/jpeg'
       else if (buf[0] === 0x89 && buf[1] === 0x50) mime = 'image/png'
       else if (buf[0] === 0x47 && buf[1] === 0x49) mime = 'image/gif'
@@ -324,7 +346,8 @@ async function fetchImageAsDataUrl(url: string): Promise<string | null> {
       else mime = 'image/jpeg'
     }
     return `data:${mime};base64,${buf.toString('base64')}`
-  } catch {
+  } catch (err) {
+    console.warn(`[llm] image fetch failed: ${err instanceof Error ? err.message : String(err)}`)
     return null
   } finally {
     clearTimeout(timer)
@@ -334,17 +357,55 @@ async function fetchImageAsDataUrl(url: string): Promise<string | null> {
 async function buildUserContent(
   user: string,
   imageUrls?: string[]
-): Promise<string | ChatContentPart[]> {
+): Promise<{ content: string | ChatContentPart[]; imageCount: number }> {
   const urls = (imageUrls ?? []).filter((u) => typeof u === 'string' && u.trim()).slice(0, MAX_VISION_IMAGES)
-  if (urls.length === 0) return user
-  const parts: ChatContentPart[] = [{ type: 'text', text: user }]
+  if (urls.length === 0 || localVisionDisabledReason) return { content: user, imageCount: 0 }
+  // Images first, then text — some multimodal stacks prefer that order.
+  const parts: ChatContentPart[] = []
+  let imageCount = 0
   for (const url of urls) {
     const dataUrl = await fetchImageAsDataUrl(url)
-    if (dataUrl) parts.push({ type: 'image_url', image_url: { url: dataUrl } })
+    if (dataUrl) {
+      parts.push({ type: 'image_url', image_url: { url: dataUrl } })
+      imageCount++
+    }
   }
-  // If every download failed, stay text-only so generation still works.
-  if (parts.length === 1) return user
-  return parts
+  parts.push({ type: 'text', text: user })
+  if (imageCount === 0) return { content: user, imageCount: 0 }
+  return { content: parts, imageCount }
+}
+
+/** llama.cpp without --mmproj rejects multimodal payloads. */
+function isVisionUnsupportedError(status: number, body: string): boolean {
+  const hay = `${status} ${body}`.toLowerCase()
+  if (hay.includes('mmproj')) return true
+  if (hay.includes('image input is not supported')) return true
+  if (hay.includes('image input') && hay.includes('not supported')) return true
+  if (hay.includes('multimodal') && hay.includes('not supported')) return true
+  if (hay.includes('vision') && (hay.includes('not supported') || hay.includes('unsupported'))) return true
+  // Generic 4xx/5xx that clearly point at images
+  if ((status === 400 || status === 415 || status === 500) && hay.includes('image') && hay.includes('support'))
+    return true
+  return false
+}
+
+function extractAssistantText(label: string, status: number, body: string): string {
+  const choices = asObj(parseJson(label, status, body)).choices
+  const first = Array.isArray(choices) && choices.length > 0 ? asObj(choices[0]) : {}
+  const content = asObj(first.message).content
+  if (typeof content === 'string' && content.trim()) return content.trim()
+  if (Array.isArray(content)) {
+    const text = content
+      .map((p) => {
+        const o = asObj(p)
+        if (typeof o.text === 'string') return o.text
+        return ''
+      })
+      .join('')
+      .trim()
+    if (text) return text
+  }
+  throw new Error(`${label}: response had no message content — ${snippet(body)}`)
 }
 
 async function chatCompletion(
@@ -360,13 +421,16 @@ async function chatCompletion(
   /** When set, user message becomes multimodal (vision). Local path only for now. */
   imageUrls?: string[]
 ): Promise<string> {
-  const userContent = await buildUserContent(user, imageUrls)
+  const modelId = cleanModelId(model)
+  const urls = (imageUrls ?? []).filter((u) => typeof u === 'string' && u.trim())
+  const built = await buildUserContent(user, urls)
+  const sentImages = built.imageCount > 0
   const body = {
     ...sampling,
-    model,
+    model: modelId,
     messages: [
       { role: 'system', content: system },
-      { role: 'user', content: userContent },
+      { role: 'user', content: built.content },
     ],
   }
   let res: HttpReply
@@ -383,29 +447,37 @@ async function chatCompletion(
   } catch (err) {
     throw new Error(`${label}: ${describeError(err)}`)
   }
-  if (!res.ok) throw new Error(httpMessage(label, res.status, res.body))
-  const choices = asObj(parseJson(label, res.status, res.body)).choices
-  const first = Array.isArray(choices) && choices.length > 0 ? asObj(choices[0]) : {}
-  const content = asObj(first.message).content
-  if (typeof content === 'string' && content.trim()) return content.trim()
-  // Some vision servers return content as an array of parts.
-  if (Array.isArray(content)) {
-    const text = content
-      .map((p) => {
-        const o = asObj(p)
-        if (typeof o.text === 'string') return o.text
-        return ''
-      })
-      .join('')
-      .trim()
-    if (text) return text
+  // Text-only local servers (llama.cpp without --mmproj) reject image parts.
+  // Fall back once so replies still work; remember for this process.
+  if (!res.ok && sentImages && isVisionUnsupportedError(res.status, res.body)) {
+    const detail = snippet(res.body)
+    localVisionDisabledReason = detail || 'image input is not supported'
+    console.warn(
+      `[llm] local vision rejected by server — falling back to text-only for this session. ` +
+        `Detail: ${localVisionDisabledReason}. ` +
+        `To enable vision with llama.cpp, start the server with a multimodal GGUF + matching --mmproj file.`
+    )
+    const textOnlyUser =
+      user +
+      '\n\n(An image was attached but this local server cannot view images yet. Reply from the text only.)'
+    return chatCompletion(label, url, headers, modelId, system, textOnlyUser, sampling, undefined)
   }
-  throw new Error(`${label}: response had no message content — ${snippet(res.body)}`)
+  if (!res.ok) throw new Error(httpMessage(label, res.status, res.body))
+  return extractAssistantText(label, res.status, res.body)
 }
 
 export type GenerateTextOptions = {
   /** Image URLs (https or data:) — only used when provider is `local`. */
   imageUrls?: string[]
+}
+
+/** True when this process already learned the local server cannot do vision. */
+export function isLocalVisionDisabled(): boolean {
+  return Boolean(localVisionDisabledReason)
+}
+
+export function localVisionDisabledMessage(): string | null {
+  return localVisionDisabledReason
 }
 
 export async function generateText(
@@ -416,7 +488,11 @@ export async function generateText(
 ): Promise<string> {
   const maxTokens = resolveMaxTokens(llm)
   // Vision is intentionally local-only for now (user's OpenAI-compatible vision model).
-  const visionUrls = llm.provider === 'local' ? opts?.imageUrls : undefined
+  let visionUrls = llm.provider === 'local' ? opts?.imageUrls : undefined
+  if (visionUrls?.length && localVisionDisabledReason) {
+    console.warn(`[llm] skipping images (vision disabled this session: ${localVisionDisabledReason})`)
+    visionUrls = undefined
+  }
   switch (llm.provider) {
     case 'claude':
       return generateClaude(llm.claude, system, user, maxTokens)
@@ -426,7 +502,7 @@ export async function generateText(
         'OpenAI',
         'https://api.openai.com/v1/chat/completions',
         { authorization: `Bearer ${llm.openai.apiKey}` },
-        llm.openai.model,
+        cleanModelId(llm.openai.model),
         system,
         user,
         { max_completion_tokens: maxTokens }
@@ -438,7 +514,7 @@ export async function generateText(
         'Gemini',
         `${GEMINI_OPENAI_BASE}/chat/completions`,
         { authorization: `Bearer ${llm.gemini.apiKey}` },
-        llm.gemini.model,
+        cleanModelId(llm.gemini.model),
         system,
         user,
         { max_tokens: maxTokens, temperature: 0.8 }
@@ -454,7 +530,7 @@ export async function generateText(
         'Local LLM',
         localChatUrl(base),
         apiKey ? { authorization: `Bearer ${apiKey}` } : {},
-        llm.local.model,
+        cleanModelId(llm.local.model),
         system,
         user,
         { max_tokens: maxTokens, temperature: 0.8 },
