@@ -55,6 +55,11 @@ export interface AutopilotSettings {
   intervalMinutes: number
   replyIntervalMinutes: number
   goal: string
+  /**
+   * Temporary secondary objective (e.g. soft-promote an app). Empty = off.
+   * Woven in lightly alongside the main goal — not every post.
+   */
+  sideMission: string
   categories: string[]
   postLanguage: PostLanguageMode
   toneNotes: string

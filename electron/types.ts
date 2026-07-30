@@ -63,6 +63,11 @@ export interface AutopilotSettings {
   intervalMinutes: number     // how often the agent thinks about new posts
   replyIntervalMinutes: number // how often it scans replies + @mentions (separate, usually faster)
   goal: string                // what the agent is trying to achieve
+  /**
+   * Temporary secondary objective (e.g. soft-promote an app). Empty = off.
+   * Woven in lightly alongside the main goal — not every post.
+   */
+  sideMission: string
   categories: string[]        // niches the agent posts about
   postLanguage: PostLanguageMode
   toneNotes: string           // optional extra personality guidance

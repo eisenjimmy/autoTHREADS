@@ -64,6 +64,7 @@ export function defaultAutopilot(): AutopilotSettings {
     replyIntervalMinutes: 5, // replies + @mentions run on a separate, faster timer
     goal:
       'Grow an engaged Threads following with posts that feel native to popular Threads niches — especially AI, tech, builders, and hot takes people actually reply to.',
+    sideMission: '', // temporary promo / campaign context; empty = off
     categories: [...AUTOPILOT_DEFAULT_CATEGORIES],
     postLanguage: 'match',
     toneNotes: '',
@@ -266,6 +267,7 @@ function normalizeAutopilot(
     intervalMinutes: clampInt(r.intervalMinutes, 1, 1440, d.intervalMinutes),
     replyIntervalMinutes: clampInt(r.replyIntervalMinutes, 1, 1440, d.replyIntervalMinutes),
     goal: str(r.goal, d.goal),
+    sideMission: str(r.sideMission, '').slice(0, 1200),
     // Empty list falls back to popular Threads niches (AI-first defaults).
     categories: Array.isArray(r.categories)
       ? categories.length > 0

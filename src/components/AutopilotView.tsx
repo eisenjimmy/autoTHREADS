@@ -44,6 +44,7 @@ export default function AutopilotView() {
       typeof ap.recentPostMemory === 'number' && Number.isFinite(ap.recentPostMemory)
         ? ap.recentPostMemory
         : 5,
+    sideMission: typeof ap.sideMission === 'string' ? ap.sideMission : '',
   })
 
   const [form, setForm] = useState<AutopilotSettings>(() => withReplyDefaults(settings.autopilot))
@@ -324,18 +325,42 @@ export default function AutopilotView() {
             </div>
           )}
 
-          {/* goal */}
+          {/* goal + side mission */}
           <div className="section">
             <div className="section-title">{t('Goal', '목표')}</div>
             <div className="section-desc">
-              {t('What is the agent trying to achieve? Drives every decision.', '에이전트가 달성하려는 목표입니다. 모든 판단의 기준이 됩니다.')}
+              {t(
+                'Primary objective — drives planning, posts, and replies.',
+                '주 목표입니다. 계획·게시·답글 판단의 기준이 됩니다.'
+              )}
             </div>
             <textarea
               className="textarea"
               value={form.goal}
               onChange={(e) => edit({ goal: e.target.value })}
-              placeholder={t('e.g. Grow an engaged following with relatable, funny takes.', '예: 공감되고 재미있는 글로 팔로워와 참여를 늘리기')}
+              placeholder={t(
+                'e.g. Grow an engaged following with relatable, funny takes.',
+                '예: 공감되고 재미있는 글로 팔로워와 참여를 늘리기'
+              )}
             />
+            <div className="field" style={{ marginTop: 14 }}>
+              <span className="field-label">{t('Side mission (optional)', '사이드 미션 (선택)')}</span>
+              <div className="section-desc" style={{ marginBottom: 6 }}>
+                {t(
+                  'Temporary secondary objective — e.g. soft-promote an app or campaign. Leave empty to turn off. The agent weaves it in lightly when natural (not every post), never hard-sells.',
+                  '임시 부목표 — 예: 앱/캠페인 자연스럽게 알리기. 비우면 끔. 자연스러울 때만 가볍게 녹여 넣고(매 글 강제 아님), 노골적 광고는 하지 않습니다.'
+                )}
+              </div>
+              <textarea
+                className="textarea"
+                value={form.sideMission ?? ''}
+                onChange={(e) => edit({ sideMission: e.target.value })}
+                placeholder={t(
+                  'e.g. Soft-promote QuantFox (my quant/trading app) when it fits AI/finance chat — mention the name once, no hard sell, link only if natural.',
+                  '예: AI·금융 대화에 어울릴 때 QuantFox(내 퀀트/트레이딩 앱)를 자연스럽게 한 번 언급. 강매 금지, 링크는 자연스러울 때만.'
+                )}
+              />
+            </div>
           </div>
 
           {/* categories */}
