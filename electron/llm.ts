@@ -283,6 +283,70 @@ async function generateClaude(
   throw new Error(`Anthropic: response had no text content — ${snippet(res.body)}`)
 }
 
+/** OpenAI-compatible multimodal content parts (text + image_url). */
+type ChatContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string } }
+
+const IMAGE_FETCH_TIMEOUT_MS = 20_000
+const MAX_VISION_IMAGES = 3
+const MAX_IMAGE_BYTES = 4 * 1024 * 1024 // 4MB per image before skip
+
+/**
+ * Download a remote image and return a data: URL for local vision models.
+ * Returns null on failure so callers can fall back to text-only.
+ */
+async function fetchImageAsDataUrl(url: string): Promise<string | null> {
+  const u = url.trim()
+  if (!u || !/^https?:\/\//i.test(u)) return null
+  if (u.startsWith('data:image/')) return u
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), IMAGE_FETCH_TIMEOUT_MS)
+  try {
+    const res = await fetch(u, {
+      signal: controller.signal,
+      headers: { 'User-Agent': 'AutoThreads/1.0 (vision)' },
+    })
+    if (!res.ok) return null
+    const buf = Buffer.from(await res.arrayBuffer())
+    if (buf.byteLength === 0 || buf.byteLength > MAX_IMAGE_BYTES) return null
+    const ctHeader = (res.headers.get('content-type') || '').split(';')[0].trim().toLowerCase()
+    let mime = ctHeader.startsWith('image/') ? ctHeader : ''
+    if (!mime) {
+      // Guess from magic bytes / URL.
+      if (buf[0] === 0xff && buf[1] === 0xd8) mime = 'image/jpeg'
+      else if (buf[0] === 0x89 && buf[1] === 0x50) mime = 'image/png'
+      else if (buf[0] === 0x47 && buf[1] === 0x49) mime = 'image/gif'
+      else if (buf[0] === 0x52 && buf[1] === 0x49) mime = 'image/webp'
+      else if (/\.jpe?g(\?|$)/i.test(u)) mime = 'image/jpeg'
+      else if (/\.png(\?|$)/i.test(u)) mime = 'image/png'
+      else if (/\.webp(\?|$)/i.test(u)) mime = 'image/webp'
+      else mime = 'image/jpeg'
+    }
+    return `data:${mime};base64,${buf.toString('base64')}`
+  } catch {
+    return null
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+async function buildUserContent(
+  user: string,
+  imageUrls?: string[]
+): Promise<string | ChatContentPart[]> {
+  const urls = (imageUrls ?? []).filter((u) => typeof u === 'string' && u.trim()).slice(0, MAX_VISION_IMAGES)
+  if (urls.length === 0) return user
+  const parts: ChatContentPart[] = [{ type: 'text', text: user }]
+  for (const url of urls) {
+    const dataUrl = await fetchImageAsDataUrl(url)
+    if (dataUrl) parts.push({ type: 'image_url', image_url: { url: dataUrl } })
+  }
+  // If every download failed, stay text-only so generation still works.
+  if (parts.length === 1) return user
+  return parts
+}
+
 async function chatCompletion(
   label: string,
   url: string,
@@ -292,14 +356,17 @@ async function chatCompletion(
   user: string,
   // OpenAI reasoning models reject max_tokens and non-default temperature, while
   // local OpenAI-compatible servers expect max_tokens — so the caller picks.
-  sampling: Json
+  sampling: Json,
+  /** When set, user message becomes multimodal (vision). Local path only for now. */
+  imageUrls?: string[]
 ): Promise<string> {
+  const userContent = await buildUserContent(user, imageUrls)
   const body = {
     ...sampling,
     model,
     messages: [
       { role: 'system', content: system },
-      { role: 'user', content: user },
+      { role: 'user', content: userContent },
     ],
   }
   let res: HttpReply
@@ -321,11 +388,35 @@ async function chatCompletion(
   const first = Array.isArray(choices) && choices.length > 0 ? asObj(choices[0]) : {}
   const content = asObj(first.message).content
   if (typeof content === 'string' && content.trim()) return content.trim()
+  // Some vision servers return content as an array of parts.
+  if (Array.isArray(content)) {
+    const text = content
+      .map((p) => {
+        const o = asObj(p)
+        if (typeof o.text === 'string') return o.text
+        return ''
+      })
+      .join('')
+      .trim()
+    if (text) return text
+  }
   throw new Error(`${label}: response had no message content — ${snippet(res.body)}`)
 }
 
-export async function generateText(llm: LlmSettings, system: string, user: string): Promise<string> {
+export type GenerateTextOptions = {
+  /** Image URLs (https or data:) — only used when provider is `local`. */
+  imageUrls?: string[]
+}
+
+export async function generateText(
+  llm: LlmSettings,
+  system: string,
+  user: string,
+  opts?: GenerateTextOptions
+): Promise<string> {
   const maxTokens = resolveMaxTokens(llm)
+  // Vision is intentionally local-only for now (user's OpenAI-compatible vision model).
+  const visionUrls = llm.provider === 'local' ? opts?.imageUrls : undefined
   switch (llm.provider) {
     case 'claude':
       return generateClaude(llm.claude, system, user, maxTokens)
@@ -366,7 +457,8 @@ export async function generateText(llm: LlmSettings, system: string, user: strin
         llm.local.model,
         system,
         user,
-        { max_tokens: maxTokens, temperature: 0.8 }
+        { max_tokens: maxTokens, temperature: 0.8 },
+        visionUrls
       )
     }
     case 'other': {

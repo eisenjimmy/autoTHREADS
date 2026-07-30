@@ -85,6 +85,7 @@ export default function RepliesView() {
         replyUsername: r.username,
         rootPostText: r.rootPostText,
         kind: r.kind === 'mention' ? 'mention' : 'reply',
+        imageUrls: r.imageUrls,
       })
       if (!res.ok) {
         toast('err', res.message)
@@ -203,6 +204,11 @@ export default function RepliesView() {
                   ) : (
                     <span className="badge">{t('reply', '답글')}</span>
                   )}
+                  {(r.imageUrls?.length ?? 0) > 0 && (
+                    <span className="badge" title={r.imageUrls!.join('\n')}>
+                      {t(`image ×${r.imageUrls!.length}`, `이미지 ×${r.imageUrls!.length}`)}
+                    </span>
+                  )}
                   <span className="item-meta">
                     {r.timestamp ? timeAgo(Date.parse(r.timestamp)) : ''}
                   </span>
@@ -212,6 +218,8 @@ export default function RepliesView() {
                   {isMention
                     ? t('mentioned you — reply will post under their thread', '나를 멘션함 — 상대 글에 답글로 게시')
                     : `on: ${snippet(r.rootPostText, 90)}`}
+                  {(r.imageUrls?.length ?? 0) > 0 &&
+                    ` · ${t('includes image (local vision)', '이미지 포함 (로컬 비전)')}`}
                 </div>
                 <div className="item-meta">
                   {existing ? (

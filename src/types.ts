@@ -195,6 +195,11 @@ export interface UnansweredReply {
   rootPostText: string
   /** 'reply' = comment on your post; 'mention' = someone @mentioned you. */
   kind?: EngagementKind
+  /**
+   * Image (or video thumbnail) URLs from Threads media, if any.
+   * Used for local vision models only.
+   */
+  imageUrls?: string[]
 }
 
 export interface TestResult {
@@ -241,6 +246,7 @@ export interface BridgeApi {
     replyUsername: string
     rootPostText: string
     kind?: EngagementKind
+    imageUrls?: string[]
   }): Promise<GenerateResult>
   imageKeywords(input: { topic?: string; title?: string; text: string }): Promise<GenerateResult>
   imageSearch(query: string): Promise<{ ok: boolean; images: ImageCandidate[]; message: string }>

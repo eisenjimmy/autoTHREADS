@@ -249,13 +249,15 @@ async function runGeneration(
   settings: AppSettings,
   userPrompt: string,
   systemPrompt?: string,
-  maxLen = MAX_CHARS
+  maxLen = MAX_CHARS,
+  imageUrls?: string[]
 ): Promise<GenerateResult> {
   try {
     const raw = await generateText(
       settings.llm,
       systemPrompt ?? buildSystemPrompt(settings.style),
-      userPrompt
+      userPrompt,
+      imageUrls && imageUrls.length > 0 ? { imageUrls } : undefined
     )
     const text = cleanOutput(raw, maxLen)
     if (!text) return { ok: false, text: '', message: 'Model returned empty text' }
@@ -302,17 +304,25 @@ export async function generateReplyDraft(input: {
   replyUsername: string
   rootPostText: string
   kind?: 'reply' | 'mention'
+  imageUrls?: string[]
 }): Promise<GenerateResult> {
   const settings = getSettings()
   const missing = unconfiguredMessage(settings.llm)
   if (missing) return { ok: false, text: '', message: missing }
+  const hasImages = (input.imageUrls?.length ?? 0) > 0
+  const visionHint =
+    hasImages && settings.llm.provider === 'local'
+      ? ' An image is attached — use what you see in it when writing the reply.'
+      : hasImages
+        ? ' (They attached an image; vision is only enabled for Local LLM — reply from the text.)'
+        : ''
   const user =
     input.kind === 'mention'
       ? `@${input.replyUsername} mentioned you in a Threads post: "${input.replyText}". ` +
-        `Write a short natural reply under ${MAX_CHARS} chars — acknowledge them and answer if they asked something.`
+        `Write a short natural reply under ${MAX_CHARS} chars — acknowledge them and answer if they asked something.${visionHint}`
       : `The author posted: "${input.rootPostText}". @${input.replyUsername} replied: "${input.replyText}". ` +
-        `Write the author's reply — helpful, in-voice, under ${MAX_CHARS} chars.`
-  return runGeneration(settings, user)
+        `Write the author's reply — helpful, in-voice, under ${MAX_CHARS} chars.${visionHint}`
+  return runGeneration(settings, user, undefined, MAX_CHARS, input.imageUrls)
 }
 
 /** One auto-draft pass: next topic (round-robin), fresh news, drafts. Never throws. */
@@ -622,6 +632,8 @@ export interface AutopilotReplyInput {
   isCreator: boolean
   /** 'mention' = @mention; 'discover' = cold reply on a public post; default = reply on yours. */
   kind?: 'reply' | 'mention' | 'discover'
+  /** Threads image/thumbnail URLs — used when LLM provider is local (vision). */
+  imageUrls?: string[]
 }
 
 export async function generateAutopilotReply(input: AutopilotReplyInput): Promise<GenerateResult> {
@@ -631,6 +643,8 @@ export async function generateAutopilotReply(input: AutopilotReplyInput): Promis
   const ap = settings.autopilot
   const parts: string[] = []
   const kind = input.kind ?? 'reply'
+  const hasImages = (input.imageUrls?.length ?? 0) > 0
+  const localVision = hasImages && settings.llm.provider === 'local'
   if (kind === 'mention') {
     parts.push('Someone @mentioned you in a Threads post (not necessarily a reply on your own thread).')
     parts.push(`@${input.replyUsername} wrote: "${input.replyText}".`)
@@ -650,6 +664,15 @@ export async function generateAutopilotReply(input: AutopilotReplyInput): Promis
     parts.push(`Your original post: "${input.rootPostText}".`)
     parts.push(`@${input.replyUsername} replied: "${input.replyText}".`)
   }
+  if (localVision) {
+    parts.push(
+      'One or more images from their post are attached. Look at the image(s) and react specifically to what you see (objects, text in image, mood) — do not invent details that are not visible.'
+    )
+  } else if (hasImages) {
+    parts.push(
+      'They attached image media, but vision is only enabled for Local LLM — reply from the text and context you have.'
+    )
+  }
   if (input.contextText && input.contextText.trim()) {
     parts.push(`Extra context from a linked page: "${input.contextText.trim().slice(0, 500)}".`)
   }
@@ -661,7 +684,13 @@ export async function generateAutopilotReply(input: AutopilotReplyInput): Promis
   }
   parts.push('Write your reply now.')
   parts.push(languageDirective(ap.postLanguage, settings.language, true))
-  return runGeneration(settings, parts.join(' '), buildPersonaPrompt(settings, 'reply'))
+  return runGeneration(
+    settings,
+    parts.join(' '),
+    buildPersonaPrompt(settings, 'reply'),
+    MAX_CHARS,
+    input.imageUrls
+  )
 }
 
 export interface AutopilotCandidate {

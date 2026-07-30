@@ -212,6 +212,11 @@ export interface UnansweredReply {
   rootPostText: string
   /** 'reply' = comment on your post; 'mention' = someone @mentioned you. Defaults to reply. */
   kind?: EngagementKind
+  /**
+   * Image (or video thumbnail) URLs from Threads media, if any.
+   * Used for local vision models only.
+   */
+  imageUrls?: string[]
 }
 
 export interface TestResult {

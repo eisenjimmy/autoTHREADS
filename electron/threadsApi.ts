@@ -336,9 +336,53 @@ interface RawReply {
   has_replies?: boolean
   is_reply?: boolean
   replied_to?: { id?: string }
+  media_type?: string
+  media_url?: string
+  thumbnail_url?: string
+  children?: { data?: { id?: string; media_type?: string; media_url?: string; thumbnail_url?: string }[] }
 }
 
-const REPLY_FIELDS = 'id,text,username,timestamp,replied_to,has_replies,is_reply'
+/** Fields for conversation/replies edges — include media so vision models can see images. */
+const REPLY_FIELDS =
+  'id,text,username,timestamp,replied_to,has_replies,is_reply,media_type,media_url,thumbnail_url,children{id,media_type,media_url,thumbnail_url}'
+
+/** Collect public image/video-thumbnail URLs from a Threads media object. */
+function extractMediaImageUrls(m: {
+  media_type?: string
+  media_url?: string
+  thumbnail_url?: string
+  children?: { data?: { media_type?: string; media_url?: string; thumbnail_url?: string }[] }
+}): string[] {
+  const urls: string[] = []
+  const push = (u?: string) => {
+    const s = typeof u === 'string' ? u.trim() : ''
+    if (s && /^https?:\/\//i.test(s) && !urls.includes(s)) urls.push(s)
+  }
+  const type = (m.media_type ?? '').toUpperCase()
+  // Prefer full image; for video use thumbnail when available.
+  if (type.includes('VIDEO')) {
+    push(m.thumbnail_url)
+    push(m.media_url)
+  } else {
+    push(m.media_url)
+    push(m.thumbnail_url)
+  }
+  const kids = m.children?.data
+  if (Array.isArray(kids)) {
+    for (const c of kids) {
+      const ct = (c.media_type ?? '').toUpperCase()
+      if (ct.includes('VIDEO')) {
+        push(c.thumbnail_url)
+        push(c.media_url)
+      } else {
+        push(c.media_url)
+        push(c.thumbnail_url)
+      }
+    }
+  }
+  // Cap so we don't flood the vision context.
+  return urls.slice(0, 4)
+}
 
 type PagedReplies = {
   data?: RawReply[]
@@ -499,8 +543,15 @@ async function fetchUnansweredPostReplies(
       // IMPORTANT: include nested replies (replied_to !== root). Previously we
       // only kept top-level replies, so ongoing threads were ignored after the
       // first comment.
-      const text = typeof m.text === 'string' ? m.text : ''
-      if (!text.trim()) continue
+      const imageUrls = extractMediaImageUrls(m)
+      const text =
+        typeof m.text === 'string' && m.text.trim()
+          ? m.text.trim()
+          : imageUrls.length > 0
+            ? '(image reply)'
+            : ''
+      // Skip empty text-only noise; keep image-only replies for vision.
+      if (!text) continue
 
       // /replies-tree may not include our own nested answers inline — probe.
       if (source === 'replies-tree' && probeBudget > 0 && myUsername) {
@@ -516,6 +567,7 @@ async function fetchUnansweredPostReplies(
         rootPostId: post.id,
         rootPostText: post.text,
         kind: 'reply',
+        ...(imageUrls.length > 0 ? { imageUrls } : {}),
       })
     }
 
@@ -550,6 +602,10 @@ interface RawMention {
   permalink?: string
   shortcode?: string
   is_reply?: boolean
+  media_type?: string
+  media_url?: string
+  thumbnail_url?: string
+  children?: { data?: { id?: string; media_type?: string; media_url?: string; thumbnail_url?: string }[] }
   owner?: { id?: string; username?: string }
 }
 
@@ -583,7 +639,7 @@ export async function fetchUnansweredMentions(
   const since = Math.max(1688540400, Math.floor(Date.now() / 1000) - 14 * 24 * 3600)
   const until = Math.floor(Date.now() / 1000)
   const fields =
-    'id,text,username,timestamp,permalink,shortcode,media_type,is_reply,owner{id,username}'
+    'id,text,username,timestamp,permalink,shortcode,media_type,media_url,thumbnail_url,is_reply,owner{id,username},children{id,media_type,media_url,thumbnail_url}'
 
   type MentionsPage = {
     data?: RawMention[]
@@ -676,11 +732,14 @@ export async function fetchUnansweredMentions(
       continue
     }
 
+    const imageUrls = extractMediaImageUrls(m)
     // Media-only mentions may have empty text — still replyable.
     const text =
       typeof m.text === 'string' && m.text.trim()
         ? m.text.trim()
-        : '(mentioned you in a post)'
+        : imageUrls.length > 0
+          ? '(mentioned you with an image)'
+          : '(mentioned you in a post)'
 
     // Skip mentions we already answered under (best-effort Graph probe).
     if (probeBudget > 0 && myUsername) {
@@ -700,6 +759,7 @@ export async function fetchUnansweredMentions(
       rootPostId: m.id,
       rootPostText: text,
       kind: 'mention',
+      ...(imageUrls.length > 0 ? { imageUrls } : {}),
     })
   }
 

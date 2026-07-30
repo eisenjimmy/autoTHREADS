@@ -787,6 +787,18 @@ async function runReplyPhase(repliesToday: number): Promise<number> {
 
     const isCreator = handle !== '' && r.username.trim().toLowerCase() === handle
     const contextText = await fetchReplyContext(r.text, r.rootPostText)
+    const imageUrls = Array.isArray(r.imageUrls) ? r.imageUrls : undefined
+    if (imageUrls && imageUrls.length > 0) {
+      log(
+        'info',
+        tLog(
+          `Vision: ${imageUrls.length} image(s) on @${r.username}'s ${isMention ? 'mention' : 'reply'}` +
+            (settings.llm.provider === 'local' ? ' (sending to local model).' : ' (text-only — vision is Local LLM only).'),
+          `비전: @${r.username} ${isMention ? '멘션' : '답글'}에 이미지 ${imageUrls.length}개` +
+            (settings.llm.provider === 'local' ? ' (로컬 모델로 전달).' : ' (텍스트만 — 비전은 로컬 LLM 전용).')
+        )
+      )
+    }
     const gen = await generateAutopilotReply({
       replyText: r.text,
       replyUsername: r.username,
@@ -794,6 +806,7 @@ async function runReplyPhase(repliesToday: number): Promise<number> {
       contextText,
       isCreator,
       kind,
+      imageUrls,
     })
     if (!gen.ok) {
       failures++
