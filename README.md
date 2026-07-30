@@ -11,7 +11,7 @@ control, or hand the wheel to a self-running agent that posts and replies on its
 
 <br />
 
-![Version](https://img.shields.io/badge/version-0.2.14-111111?style=flat-square)
+![Version](https://img.shields.io/badge/version-0.2.15-111111?style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-111111?style=flat-square)
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-111111?style=flat-square)
 <br />
@@ -33,10 +33,10 @@ control, or hand the wheel to a self-running agent that posts and replies on its
 ---
 
 > [!TIP]
-> **Current release: v0.2.14.** **Side mission** (e.g. soft-promo), **long posts as 1/n threads**,
-> configurable **recent-post memory** (default 5), reliable post ticks, **@mentions** + Advanced
-> Access notes, news **source links**, dual timers, max tokens (default 500), and **EN/한국어**
-> Settings + Full-Auto. See [Full-Auto](#-full-auto-mode) and [CHANGELOG.md](CHANGELOG.md).
+> **Current release: v0.2.15.** **Local vision** for reply images, **current date/time** in system
+> prompts, **side mission**, **long posts as 1/n threads**, recent-post memory (default 5), news
+> source links, dual timers, and **EN/한국어** Settings + Full-Auto. See
+> [Full-Auto](#-full-auto-mode) and [CHANGELOG.md](CHANGELOG.md).
 
 ## Contents
 
@@ -191,11 +191,13 @@ App permission “Ready for testing” is not enough by itself — the **access 
 | 🤖 **Full-Auto agent** | Dual timers: post planning + reply/mention/discover loops, daily caps, activity log. Off until Launch. |
 | 🗞️ **Live news interactive** | News-first generation, feelings posts, follower callbacks, anti-repeat memory. |
 | 💬 **Replies + @mentions** | Replies page: All / Replies / @Mentions filters. Nested thread replies included; **20 unanswered / post** hard cap on long threads. |
+| 👁️ **Local vision** | Reply/mention images from Threads are sent to **Local LLM** (OpenAI-compatible multimodal). Cloud providers stay text-only. |
+| 🗓️ **Date-aware prompts** | System prompts include current local date/time for timely writing. |
 | 🧵 **Multi-post threads** | Long AI posts publish as `1/n`…`n/n` under the root (max 5). |
 | 🎯 **Side mission** | Optional temporary secondary goal (soft promo) next to primary Goal. |
 | 🌐 **Discover engagement** | Opt-in keyword-search replies on public posts in your niches. |
 | 🎲 **Sporadic posts** | Randomly skip post ticks for a more human cadence. |
-| 💻 **Local LLM** | Jarvis, Ollama, LM Studio, llama.cpp, or any OpenAI-compatible local server — **$0 API cost**. |
+| 💻 **Local LLM** | Jarvis, Ollama, LM Studio, llama.cpp, or any OpenAI-compatible local server — **$0 API cost** (vision supported). |
 | ☁️ **Cloud models** | Claude, ChatGPT/OpenAI, Gemini, or custom OpenAI-compatible provider. |
 | 🖼️ **Image assist** | AI keywords → Wikimedia Commons → you choose. |
 | 🗣️ **Writing style** | Style notes, samples, import recent Threads posts. |
@@ -250,7 +252,7 @@ npm run package:win    # Windows
 npm run package:all    # both
 ```
 
-Prebuilt macOS + Windows installers: [GitHub Releases](https://github.com/eisenjimmy/autoTHREADS/releases) (latest **v0.2.14**).
+Prebuilt macOS + Windows installers: [GitHub Releases](https://github.com/eisenjimmy/autoTHREADS/releases) (latest **v0.2.15**).
 
 > Apps are not notarized yet. On first open: right-click → **Open** (or allow under Privacy & Security).
 
@@ -536,6 +538,8 @@ AutoThreads는 Threads 운영을 AI로 도와주는 데스크톱 앱입니다. �
 | --- | --- |
 | 📰 **뉴스/블로그 기반 초안** | 주제·프리셋 + Google · Yahoo · HN · Naver · 커스텀 RSS/Atom |
 | 🤖 **완전 자동** | 이중 타이머, 멘션, 중첩 답글, 발견 답글, 활동 로그(한국어 지원) |
+| 👁️ **로컬 비전** | 답글·멘션 이미지를 Local LLM(OpenAI 호환 비전)에 전달 |
+| 🗓️ **날짜 인식** | 시스템 프롬프트에 현재 날짜·시각 포함 |
 | 🗞️ **실시간 뉴스 상호작용** | 뉴스 우선 · 감정 글 · 팔로워 콜백 · 반복 방지 |
 | 💬 **답글 페이지** | 전체 / 답글 / @멘션 필터. 긴 스레드는 **게시물당 미답변 20개** 한도 |
 | 💻 **Local LLM** | Jarvis, Ollama, LM Studio 등 OpenAI 호환 — API 비용 $0 |
@@ -561,7 +565,7 @@ npm run build
 npm start
 ```
 
-설치 파일 (macOS + Windows): [Releases](https://github.com/eisenjimmy/autoTHREADS/releases) (최신 **v0.2.14**)
+설치 파일 (macOS + Windows): [Releases](https://github.com/eisenjimmy/autoTHREADS/releases) (최신 **v0.2.15**)
 
 ## AI 설정
 

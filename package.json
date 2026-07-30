@@ -1,7 +1,7 @@
 {
   "name": "autothreads-locallm",
   "productName": "AutoThreads",
-  "version": "0.2.14",
+  "version": "0.2.15",
   "private": true,
   "description": "Automagical Threads automation desktop app: AI drafts, Full-Auto agent, local LLM support, image search, replies, scheduling, and user-controlled publishing.",
   "author": "Jimmy Park",

@@ -9,6 +9,21 @@ Session-level notes also live under `_changelog/`.
 
 ---
 
+## [0.2.15] — 2026-07-30
+
+### Added
+
+- **Local vision for reply images** — Threads reply/mention media (`media_url`, thumbnails, carousel children) is fetched; when the AI provider is **Local LLM**, images are downloaded as base64 and sent as OpenAI-compatible multimodal content so the vision model can see them. Cloud providers stay text-only for now.
+- **Current date/time in system prompts** — persona, planner, and draft prompts include a localized “now” string for timely posts/replies.
+- Replies page shows an **image ×N** badge when media is present.
+
+### Notes
+
+- Image-only replies are kept (text becomes a short placeholder).
+- Up to 3 images per engagement; ~4 MB max per download.
+
+---
+
 ## [0.2.14] — 2026-07-28
 
 ### Added
