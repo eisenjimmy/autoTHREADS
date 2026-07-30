@@ -9,6 +9,20 @@ Session-level notes also live under `_changelog/`.
 
 ---
 
+## [0.2.14] — 2026-07-28
+
+### Added
+
+- **Side mission** — optional temporary secondary goal (e.g. soft-promote QuantFox) next to the primary Goal; woven in lightly when natural (posts + replies + planner).
+- **Long posts as threads** — drafts over 500 chars are published as numbered Threads (e.g. `1/3`, `2/3`, `3/3`) under the root post instead of mid-sentence clipping. Max 5 parts (~2500 chars total). News source link stays on the last part.
+- **Recent posts memory** — configurable (1–20, default **5**) under Cadence & limits; fewer past posts loaded for anti-repeat → fewer LLM tokens.
+
+### Fixed / improved
+
+- Clearer Full-Auto logging when publish-live is off (draft-only ticks) and when reply ticks dominate the log vs post timer.
+
+---
+
 ## [0.2.13] — 2026-07-28
 
 ### Fixed

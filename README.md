@@ -11,7 +11,7 @@ control, or hand the wheel to a self-running agent that posts and replies on its
 
 <br />
 
-![Version](https://img.shields.io/badge/version-0.2.13-111111?style=flat-square)
+![Version](https://img.shields.io/badge/version-0.2.14-111111?style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-111111?style=flat-square)
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-111111?style=flat-square)
 <br />
@@ -33,11 +33,10 @@ control, or hand the wheel to a self-running agent that posts and replies on its
 ---
 
 > [!TIP]
-> **Current release: v0.2.13.** Full-Auto posts reliably (lighter sporadic + forced post when the
-> planner is empty), **@mentions** with Mentions API logging / Advanced Access notes, news posts
-> with **source links**, dual timers, nested replies, **20 unanswered / post** cap, max tokens
-> (default 500), and **EN/한국어** Settings + Full-Auto. See [Full-Auto](#-full-auto-mode) and
-> [CHANGELOG.md](CHANGELOG.md).
+> **Current release: v0.2.14.** **Side mission** (e.g. soft-promo), **long posts as 1/n threads**,
+> configurable **recent-post memory** (default 5), reliable post ticks, **@mentions** + Advanced
+> Access notes, news **source links**, dual timers, max tokens (default 500), and **EN/한국어**
+> Settings + Full-Auto. See [Full-Auto](#-full-auto-mode) and [CHANGELOG.md](CHANGELOG.md).
 
 ## Contents
 
@@ -107,11 +106,13 @@ POST TIMER (default 60 min)          REPLY TIMER (default 5 min)
 
 | Setting | What it controls |
 | --- | --- |
-| **Goal** | What the agent optimizes for — followers, comments, likes. Drives every decision. |
+| **Goal** | Primary objective — followers, engagement, etc. Drives planning, posts, and replies. |
+| **Side mission** | Optional temporary secondary goal (e.g. soft-promote an app). Empty = off. Woven in lightly when natural — never hard-sell. |
 | **Topics / niches** | Removable pills (×) + popular autocomplete. Popular Threads niches first (**AI**, tech, startups, productivity, humor…) plus more categories and custom multi-select. |
 | **Post language** | Match the source, Korean only, English only, or follow the app language. |
 | **Personality** | Agent name, creator, creator `@handle`, address term (e.g. "Master"), and tone notes. |
 | **Post timer** | How often the agent plans/posts (default **60 min**). |
+| **Recent posts memory** | How many past posts to load for anti-repeat (1–20, default **5**) — lower uses fewer LLM tokens. |
 | **Reply / mention timer** | How often it scans replies + mentions (default **5 min**). Separate from the post timer. |
 | **Original vs news** | Mix of original riffs vs news reactions (live-news mode caps originals so news stays primary). |
 | **Post here and there (sporadic)** | Lightly skips ~18% of scheduled post ticks (never two in a row; **Run once** always posts). |
@@ -143,7 +144,9 @@ While running, the Auto tab shows:
 ### How it behaves
 
 - **News-first (when Live news interactive is on)** — most posts react to **current scraped headlines**, not recycled LLM monologues. News posts always **include the source article URL** at the end.
-- **Anti-repeat** — remembers recent posts (local drafts + live Threads scrape) so topics/angles don’t loop.
+- **Long posts → threads** — over 500 characters, published as numbered parts (`1/3`, `2/3`, `3/3`…) under the root (max 5 parts) instead of mid-sentence clipping.
+- **Side mission** — temporary promo/campaign context sits beside the primary goal in the system prompt and planner.
+- **Anti-repeat** — remembers recent posts (local drafts + live Threads scrape; count is configurable) so topics/angles don’t loop.
 - **Interactive** — occasional feelings posts and light callbacks to followers about prior remarks.
 - **Knows its creator** — replies from your `@handle` get special, warm treatment.
 - **Human, not a news desk** — funny, casual, opinionated; written to invite replies and likes.
@@ -188,6 +191,8 @@ App permission “Ready for testing” is not enough by itself — the **access 
 | 🤖 **Full-Auto agent** | Dual timers: post planning + reply/mention/discover loops, daily caps, activity log. Off until Launch. |
 | 🗞️ **Live news interactive** | News-first generation, feelings posts, follower callbacks, anti-repeat memory. |
 | 💬 **Replies + @mentions** | Replies page: All / Replies / @Mentions filters. Nested thread replies included; **20 unanswered / post** hard cap on long threads. |
+| 🧵 **Multi-post threads** | Long AI posts publish as `1/n`…`n/n` under the root (max 5). |
+| 🎯 **Side mission** | Optional temporary secondary goal (soft promo) next to primary Goal. |
 | 🌐 **Discover engagement** | Opt-in keyword-search replies on public posts in your niches. |
 | 🎲 **Sporadic posts** | Randomly skip post ticks for a more human cadence. |
 | 💻 **Local LLM** | Jarvis, Ollama, LM Studio, llama.cpp, or any OpenAI-compatible local server — **$0 API cost**. |
@@ -245,7 +250,7 @@ npm run package:win    # Windows
 npm run package:all    # both
 ```
 
-Prebuilt macOS + Windows installers: [GitHub Releases](https://github.com/eisenjimmy/autoTHREADS/releases) (latest **v0.2.13**).
+Prebuilt macOS + Windows installers: [GitHub Releases](https://github.com/eisenjimmy/autoTHREADS/releases) (latest **v0.2.14**).
 
 > Apps are not notarized yet. On first open: right-click → **Open** (or allow under Privacy & Security).
 
@@ -495,6 +500,9 @@ AutoThreads는 Threads 운영을 AI로 도와주는 데스크톱 앱입니다. �
 | 토글 | 설명 |
 | --- | --- |
 | **여기저기 게시 (불규칙)** | 예약 게시 틱의 약 18%만 건너뜀 (연속 스킵 없음 · **한 번 실행**은 항상 게시) |
+| **사이드 미션** | 임시 부목표 (예: 앱 자연스럽게 알리기). 비우면 끔 |
+| **최근 게시 기억** | 반복 방지용 최근 글 수 (기본 5, 토큰 절약) |
+| **긴 글 스레드** | 500자 초과 시 `1/3` `2/3` `3/3` 형태로 루트 아래 연달아 게시 (최대 5단) |
 | **실시간 뉴스 + 상호작용 보이스** | 스크랩 뉴스 위주 · 가끔 최근 3개 글·답글 기반 감정 글 · 팔로워에게 이전 발언 언급. 앱의 **(?)** 툴팁 참고 |
 | **내 게시물 답글 응대** | 진행 중인 스레드의 **중첩 답글** 포함. **게시물당 미답변 최대 20개**(최신 우선) 고정 한도 |
 | **@멘션 응대** | `threads_manage_mentions` 토큰 필요. **Advanced Access** 없으면 앱 테스터 멘션만 API에 보임 |
@@ -553,7 +561,7 @@ npm run build
 npm start
 ```
 
-설치 파일 (macOS + Windows): [Releases](https://github.com/eisenjimmy/autoTHREADS/releases) (최신 **v0.2.13**)
+설치 파일 (macOS + Windows): [Releases](https://github.com/eisenjimmy/autoTHREADS/releases) (최신 **v0.2.14**)
 
 ## AI 설정
 
