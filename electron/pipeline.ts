@@ -179,9 +179,46 @@ export function unconfiguredMessage(llm: AppSettings['llm']): string | null {
   return null
 }
 
-function buildSystemPrompt(style: StyleSettings): string {
+/** Human-readable "now" for system prompts so the model knows current date/time. */
+function formatNowForPrompt(lang?: string): string {
+  const d = new Date()
+  const locale =
+    lang === 'ko'
+      ? 'ko-KR'
+      : lang === 'ja'
+        ? 'ja-JP'
+        : lang === 'zh'
+          ? 'zh-CN'
+          : lang === 'es'
+            ? 'es-ES'
+            : lang === 'fr'
+              ? 'fr-FR'
+              : lang === 'de'
+                ? 'de-DE'
+                : lang === 'pt'
+                  ? 'pt-BR'
+                  : 'en-US'
+  try {
+    return d.toLocaleString(locale, {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+      timeZoneName: 'short',
+    })
+  } catch {
+    return d.toISOString()
+  }
+}
+
+function buildSystemPrompt(style: StyleSettings, language?: string): string {
   const lines = [
     "You ghost-write posts for Threads (Meta's microblogging platform).",
+    `Current date and time: ${formatNowForPrompt(language)}. Use this when referring to "today", news timing, or recency.`,
     'Rules:',
     `- Maximum ${MAX_CHARS} characters.`,
     '- Plain conversational text.',
@@ -255,7 +292,7 @@ async function runGeneration(
   try {
     const raw = await generateText(
       settings.llm,
-      systemPrompt ?? buildSystemPrompt(settings.style),
+      systemPrompt ?? buildSystemPrompt(settings.style, settings.language),
       userPrompt,
       imageUrls && imageUrls.length > 0 ? { imageUrls } : undefined
     )
@@ -455,6 +492,10 @@ function buildPersonaPrompt(settings: AppSettings, kind: 'post' | 'reply', categ
     name
       ? `You are "${name}", a real-feeling personality running a Threads (Meta) account.`
       : 'You run a Threads (Meta) account with a real-feeling personality.'
+  )
+  lines.push(
+    `Current date and time: ${formatNowForPrompt(settings.language)}. ` +
+      'Use this for "today", day-of-week, recency, and timely references — do not invent a different date.'
   )
   if (creator) {
     lines.push(
@@ -815,6 +856,7 @@ export async function decideAutopilotPlan(input: {
   const niches = ap.categories.length > 0 ? ap.categories.join(', ') : 'ai, technology, startups, productivity, humor'
   const system = [
     'You are the planning brain of an autonomous Threads account focused on audience growth.',
+    `Current date and time: ${formatNowForPrompt(settings.language)}. Prefer timely angles when news is current.`,
     `PRIMARY goal: ${ap.goal.trim() || 'grow an engaged following.'}`,
     ap.sideMission.trim()
       ? `SIDE MISSION (temporary, secondary): ${ap.sideMission.trim()}. Occasionally plan an angle that soft-supports this without becoming an ad. Most posts still serve the primary goal.`
