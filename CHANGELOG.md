@@ -9,16 +9,20 @@ Session-level notes also live under `_changelog/`.
 
 ---
 
-## [0.2.17] — 2026-07-30
+## [0.2.18] — 2026-07-31
 
 ### Fixed
 
-- **Multi-part thread 1/n no longer re-posts part 1 on retry.** After each part publishes, AutoThreads saves `threadRootId` + `threadPartsPosted` on the draft. If part 2+ fails (or the app restarts mid-thread), the next retry continues from the next unposted part instead of duplicating `1/2`.
-- **Image replies (vision) more reliable:**
-  - Hydrate `media_url` via a single-media Graph fetch when list/mention edges omit image URLs (common cause of "guess what this is" replies that never saw the photo).
-  - Stronger vision instructions so **creator/boss persona** does not override identifying what is in the image.
-  - Clear console logs when images download (or all downloads fail).
-  - Saving Settings with Local LLM clears the session "vision disabled" flag (so restarting llama with `--mmproj` takes effect without a full app restart).
+- **Image replies + Local LLM:** multimodal POSTs that drop the connection (`ECONNREFUSED` / reset / timeout) or return 4xx/5xx now fall back to **text-only** for the session instead of hard-failing reply generation.
+- Prefer smaller Threads **thumbnail** media for vision payloads; tighter size caps (~1.5 MB, 2 images) to avoid crashing text-only local servers.
+
+### Added
+
+- App **version in the UI** — status bar footer and sidebar show `v0.2.18` (from `package.json`).
+
+### Notes
+
+- For real vision, run Jarvis primary llama-server with `JARVIS_ENABLE_MMPROJ=true` and a matching **mmproj** (e.g. `mmproj-F16.gguf`). Ensure the server is running on the URL configured in AutoThreads (default `http://127.0.0.1:8080`).
 
 ---
 

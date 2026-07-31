@@ -75,6 +75,9 @@ export default function Sidebar() {
         <button className="side-item" onClick={toggleTheme}>
           <span>{settings?.theme === 'dark' ? text.light : text.dark}</span>
         </button>
+        <div className="side-version" title="AutoThreads version">
+          v{__APP_VERSION__}
+        </div>
       </div>
     </aside>
   )

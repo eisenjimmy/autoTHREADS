@@ -55,6 +55,10 @@ export default function StatusBar() {
       {failed > 0 && <span className="status-item">{failed} {text.failed}</span>}
       <span className="status-item">{scheduled} {text.scheduled}</span>
       <span className="status-item">{drafts.length} {text.total}</span>
+      <span className="status-sep">|</span>
+      <span className="status-item status-version" title="AutoThreads version">
+        v{__APP_VERSION__}
+      </span>
     </footer>
   )
 }

@@ -797,15 +797,15 @@ async function runReplyPhase(repliesToday: number): Promise<number> {
         tLog(
           `Vision: ${imageUrls.length} image(s) on @${r.username}'s ${isMention ? 'mention' : 'reply'}` +
             (visionOff
-              ? ` (text-only fallback — server needs mmproj: ${localVisionDisabledMessage() ?? 'unsupported'}).`
+              ? ` (text-only — vision off this session: ${localVisionDisabledMessage() ?? 'unsupported'}).`
               : local
-                ? ' (sending to local model; falls back to text if server rejects vision).'
+                ? ' (local model; auto text-only if vision fails / ECONNREFUSED / no mmproj).'
                 : ' (text-only — vision is Local LLM only).'),
           `비전: @${r.username} ${isMention ? '멘션' : '답글'}에 이미지 ${imageUrls.length}개` +
             (visionOff
-              ? ' (텍스트 폴백 — 서버에 mmproj 필요).'
+              ? ' (텍스트 폴백 — 이 세션 비전 비활성).'
               : local
-                ? ' (로컬 모델로 전달, 거부 시 텍스트 폴백).'
+                ? ' (로컬 모델; 비전 실패·ECONNREFUSED·mmproj 없으면 텍스트 폴백).'
                 : ' (텍스트만 — 비전은 로컬 LLM 전용).')
         )
       )

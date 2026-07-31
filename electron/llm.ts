@@ -432,6 +432,76 @@ function extractAssistantText(label: string, status: number, body: string): stri
   throw new Error(`${label}: response had no message content — ${snippet(body)}`)
 }
 
+<<<<<<< Updated upstream
+=======
+function textOnlyFallbackUser(user: string): string {
+  return (
+    user +
+    '\n\n(An image was attached but this local server could not use vision for this reply. Answer from the text only — do not invent image details.)'
+  )
+}
+
+/** Models URL next to a chat/completions endpoint (OpenAI-compatible). */
+function modelsProbeUrl(chatUrl: string): string {
+  try {
+    const u = new URL(chatUrl)
+    u.pathname = u.pathname.replace(/\/chat\/completions\/?$/i, '/models')
+    if (!/\/models$/i.test(u.pathname)) {
+      u.pathname = `${stripTrailingSlashes(u.pathname)}/models`
+    }
+    return u.toString()
+  } catch {
+    return `${stripChatCompletionsPath(chatUrl)}/models`
+  }
+}
+
+async function waitForLocalServer(chatUrl: string, attempts = 6, delayMs = 500): Promise<boolean> {
+  const probe = modelsProbeUrl(chatUrl)
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const res = await request(probe, { method: 'GET' }, 3_000)
+      if (res.ok || res.status === 401 || res.status === 403) return true
+    } catch {
+      /* still down */
+    }
+    await new Promise((r) => setTimeout(r, delayMs))
+  }
+  return false
+}
+
+/**
+ * After a multimodal attempt fails, disable vision for this process and retry text-only.
+ * Vision can crash undersized llama-server (ubatch < image tokens) → ECONNREFUSED for all
+ * subsequent calls; wait briefly for a restart, then text-only if the server is alive.
+ */
+async function retryTextOnlyAfterVisionFailure(
+  label: string,
+  url: string,
+  headers: Record<string, string>,
+  modelId: string,
+  system: string,
+  user: string,
+  sampling: Json,
+  reason: string
+): Promise<string> {
+  localVisionDisabledReason = reason
+  console.warn(
+    `[llm] local vision failed — falling back to text-only for this session. ` +
+      `Detail: ${reason}. ` +
+      `If the local server crashed on images, raise --ubatch-size >= --image-max-tokens ` +
+      `(Jarvis: JARVIS_UBATCH_SIZE). Text-only continues without attaching images.`
+  )
+  const up = await waitForLocalServer(url)
+  if (!up) {
+    throw new Error(
+      `${label}: ECONNREFUSED — local server is down (often crashed on a vision/image request). ` +
+        `Start Jarvis primary LLM (port 8080) and ensure --ubatch-size >= --image-max-tokens when using mmproj.`
+    )
+  }
+  return chatCompletion(label, url, headers, modelId, system, textOnlyFallbackUser(user), sampling, undefined)
+}
+
+>>>>>>> Stashed changes
 async function chatCompletion(
   label: string,
   url: string,
@@ -557,10 +627,19 @@ export async function generateText(
       if (!base) throw new Error('Local LLM base URL is required')
       const invalid = validateHttpBase(base)
       if (invalid) throw new Error(`Local LLM: ${invalid}`)
+      const chatUrl = localChatUrl(base)
+      // Fail fast with a clear message when Jarvis/llama-server is not listening.
+      const up = await waitForLocalServer(chatUrl, 2, 200)
+      if (!up) {
+        throw new Error(
+          'Local LLM: ECONNREFUSED — nothing is listening on the configured base URL ' +
+            `(${base}). Start the Jarvis primary llama-server (default http://127.0.0.1:8080).`
+        )
+      }
       const apiKey = llm.local.apiKey.trim()
       return chatCompletion(
         'Local LLM',
-        localChatUrl(base),
+        chatUrl,
         apiKey ? { authorization: `Bearer ${apiKey}` } : {},
         cleanModelId(llm.local.model),
         system,
