@@ -44,6 +44,8 @@ function sanitizeDraft(input: unknown): Draft {
     scheduledAt: optNum(o.scheduledAt),
     postedAt: optNum(o.postedAt),
     threadsMediaId: optStr(o.threadsMediaId),
+    threadRootId: optStr(o.threadRootId),
+    threadPartsPosted: optNum(o.threadPartsPosted),
     permalink: optStr(o.permalink),
     error: optStr(o.error),
     createdAt: optNum(o.createdAt) ?? now,

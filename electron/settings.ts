@@ -2,6 +2,7 @@ import { safeStorage } from 'electron'
 import { db } from './localdb'
 import type { AppSettings, AutopilotSettings, PostLanguageMode } from './types'
 import { THREADS_POST_MAX_CHARS } from './types'
+import { clearLocalVisionDisabled } from './llm'
 
 /**
  * Settings store. Secrets (API keys, Threads access token) are encrypted at
@@ -307,4 +308,6 @@ export function getSettings(): AppSettings {
 export async function setSettings(settings: AppSettings): Promise<void> {
   const clean = normalize(settings)
   await db.set('settings', mapSecrets(clean, encryptSecret))
+  // Saving settings often follows a local-server restart with --mmproj — re-allow vision.
+  if (clean.llm.provider === 'local') clearLocalVisionDisabled()
 }

@@ -9,6 +9,19 @@ Session-level notes also live under `_changelog/`.
 
 ---
 
+## [0.2.17] — 2026-07-30
+
+### Fixed
+
+- **Multi-part thread 1/n no longer re-posts part 1 on retry.** After each part publishes, AutoThreads saves `threadRootId` + `threadPartsPosted` on the draft. If part 2+ fails (or the app restarts mid-thread), the next retry continues from the next unposted part instead of duplicating `1/2`.
+- **Image replies (vision) more reliable:**
+  - Hydrate `media_url` via a single-media Graph fetch when list/mention edges omit image URLs (common cause of "guess what this is" replies that never saw the photo).
+  - Stronger vision instructions so **creator/boss persona** does not override identifying what is in the image.
+  - Clear console logs when images download (or all downloads fail).
+  - Saving Settings with Local LLM clears the session "vision disabled" flag (so restarting llama with `--mmproj` takes effect without a full app restart).
+
+---
+
 ## [0.2.16] — 2026-07-30
 
 ### Fixed

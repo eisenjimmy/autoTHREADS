@@ -349,7 +349,7 @@ export async function generateReplyDraft(input: {
   const hasImages = (input.imageUrls?.length ?? 0) > 0
   const visionHint =
     hasImages && settings.llm.provider === 'local'
-      ? ' An image is attached — use what you see in it when writing the reply.'
+      ? ' CRITICAL: an image is attached — look at it and answer based on what you see (if they ask what it is, name it).'
       : hasImages
         ? ' (They attached an image; vision is only enabled for Local LLM — reply from the text.)'
         : ''
@@ -707,7 +707,12 @@ export async function generateAutopilotReply(input: AutopilotReplyInput): Promis
   }
   if (localVision) {
     parts.push(
-      'One or more images from their post are attached. Look at the image(s) and react specifically to what you see (objects, text in image, mood) — do not invent details that are not visible.'
+      'CRITICAL — IMAGE ATTACHED: One or more images from their post are attached to this message. ' +
+        'You MUST look at the image(s) and base your reply on what you actually see ' +
+        '(objects, animals, food, text in the image, scene, mood). ' +
+        'If they ask you to guess/identify something ("이게 뭔지", "what is this", quiz, etc.), ' +
+        'answer from the image first — a short correct answer beats a witty dodge. ' +
+        'Do not invent unrelated topics (code, bugs, logs) unless those appear in the image or text.'
     )
   } else if (hasImages) {
     parts.push(
@@ -720,10 +725,17 @@ export async function generateAutopilotReply(input: AutopilotReplyInput): Promis
   if (input.isCreator) {
     const address = ap.creatorAddress.trim() || 'boss'
     parts.push(
-      `IMPORTANT: this is ${address} — the person who created you. Address them warmly as "${address}", be a little playful and deferential, and if it fits, reassure them things are running smoothly. Keep it short.`
+      `This is ${address} — the person who created you. Address them warmly as "${address}" and stay a little playful, ` +
+        `but still answer their actual question. If an image is attached, identify or react to it accurately — ` +
+        `persona does not override visual facts.`
     )
   }
   parts.push('Write your reply now.')
+  if (localVision) {
+    parts.push(
+      'Final check: your reply must reflect what is visible in the attached image when relevant.'
+    )
+  }
   parts.push(languageDirective(ap.postLanguage, settings.language, true))
   return runGeneration(
     settings,

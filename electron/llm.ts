@@ -359,19 +359,43 @@ async function buildUserContent(
   imageUrls?: string[]
 ): Promise<{ content: string | ChatContentPart[]; imageCount: number }> {
   const urls = (imageUrls ?? []).filter((u) => typeof u === 'string' && u.trim()).slice(0, MAX_VISION_IMAGES)
-  if (urls.length === 0 || localVisionDisabledReason) return { content: user, imageCount: 0 }
+  if (urls.length === 0) return { content: user, imageCount: 0 }
+  if (localVisionDisabledReason) {
+    console.warn(
+      `[llm] vision skip: session disabled (${localVisionDisabledReason}). ${urls.length} URL(s) ignored.`
+    )
+    return { content: user, imageCount: 0 }
+  }
   // Images first, then text — some multimodal stacks prefer that order.
   const parts: ChatContentPart[] = []
   let imageCount = 0
+  let failed = 0
   for (const url of urls) {
     const dataUrl = await fetchImageAsDataUrl(url)
     if (dataUrl) {
       parts.push({ type: 'image_url', image_url: { url: dataUrl } })
       imageCount++
+    } else {
+      failed++
     }
   }
+  if (imageCount === 0) {
+    console.warn(
+      `[llm] vision: 0/${urls.length} image(s) downloaded (failed=${failed}). Falling back to text-only.`
+    )
+    return {
+      content:
+        user +
+        '\n\n(Note: an image was present on their post but AutoThreads could not download it for vision. Reply from the text only.)',
+      imageCount: 0,
+    }
+  }
+  if (failed > 0) {
+    console.warn(`[llm] vision: attached ${imageCount}/${urls.length} image(s); ${failed} failed to download.`)
+  } else {
+    console.info(`[llm] vision: attached ${imageCount} image(s) for multimodal completion.`)
+  }
   parts.push({ type: 'text', text: user })
-  if (imageCount === 0) return { content: user, imageCount: 0 }
   return { content: parts, imageCount }
 }
 
@@ -478,6 +502,14 @@ export function isLocalVisionDisabled(): boolean {
 
 export function localVisionDisabledMessage(): string | null {
   return localVisionDisabledReason
+}
+
+/** Clear the session vision kill-switch (e.g. after user restarts llama with --mmproj and saves settings). */
+export function clearLocalVisionDisabled(): void {
+  if (localVisionDisabledReason) {
+    console.info(`[llm] vision re-enabled (was disabled: ${localVisionDisabledReason})`)
+  }
+  localVisionDisabledReason = null
 }
 
 export async function generateText(

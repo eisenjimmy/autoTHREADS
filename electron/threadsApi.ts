@@ -384,6 +384,43 @@ function extractMediaImageUrls(m: {
   return urls.slice(0, 4)
 }
 
+/**
+ * When list endpoints omit media_url (common on some reply edges), re-fetch the
+ * single media object so vision still gets a public image URL.
+ */
+async function hydrateMediaImageUrls(
+  cfg: ThreadsCfg,
+  mediaId: string,
+  existing: string[]
+): Promise<string[]> {
+  if (existing.length > 0) return existing
+  const id = mediaId.trim()
+  if (!id) return existing
+  try {
+    const m = await apiGet<{
+      media_type?: string
+      media_url?: string
+      thumbnail_url?: string
+      children?: { data?: { media_type?: string; media_url?: string; thumbnail_url?: string }[] }
+    }>(cfg, `/${id}`, {
+      fields: 'media_type,media_url,thumbnail_url,children{media_type,media_url,thumbnail_url}',
+    })
+    const urls = extractMediaImageUrls(m)
+    if (urls.length > 0) {
+      console.info(`[threads] hydrated ${urls.length} media URL(s) for ${id}`)
+    }
+    return urls
+  } catch (err) {
+    console.warn(`[threads] media hydrate failed for ${id}:`, errText(err))
+    return existing
+  }
+}
+
+function mediaTypeSuggestsImage(mediaType?: string): boolean {
+  const t = (mediaType ?? '').toUpperCase()
+  return t.includes('IMAGE') || t.includes('VIDEO') || t.includes('CAROUSEL') || t.includes('ALBUM')
+}
+
 type PagedReplies = {
   data?: RawReply[]
   paging?: { cursors?: { after?: string }; next?: string }
@@ -543,7 +580,14 @@ async function fetchUnansweredPostReplies(
       // IMPORTANT: include nested replies (replied_to !== root). Previously we
       // only kept top-level replies, so ongoing threads were ignored after the
       // first comment.
-      const imageUrls = extractMediaImageUrls(m)
+      let imageUrls = extractMediaImageUrls(m)
+      if (imageUrls.length === 0 && mediaTypeSuggestsImage(m.media_type)) {
+        imageUrls = await hydrateMediaImageUrls(cfg, m.id, imageUrls)
+      }
+      // Last resort: some edges omit media_type but still carry image children/url later.
+      if (imageUrls.length === 0 && !(typeof m.text === 'string' && m.text.trim())) {
+        imageUrls = await hydrateMediaImageUrls(cfg, m.id, imageUrls)
+      }
       const text =
         typeof m.text === 'string' && m.text.trim()
           ? m.text.trim()
@@ -732,7 +776,11 @@ export async function fetchUnansweredMentions(
       continue
     }
 
-    const imageUrls = extractMediaImageUrls(m)
+    let imageUrls = extractMediaImageUrls(m)
+    if (imageUrls.length === 0) {
+      // Mentions frequently include images; list endpoints sometimes omit media_url.
+      imageUrls = await hydrateMediaImageUrls(cfg, m.id, imageUrls)
+    }
     // Media-only mentions may have empty text — still replyable.
     const text =
       typeof m.text === 'string' && m.text.trim()

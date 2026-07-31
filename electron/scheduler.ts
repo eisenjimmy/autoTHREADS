@@ -37,12 +37,21 @@ function tickAll(): void {
   void tickAutoDraft()
 }
 
-/** A draft stuck in 'posting' means the app died mid-publish. It may or may not
- *  have reached Threads, so warn rather than silently inviting a duplicate. */
+/** A draft stuck in 'posting' means the app died mid-publish.
+ *  If we already persisted thread progress, retry can continue without re-posting part 1. */
 async function recoverInterrupted(): Promise<void> {
   try {
     for (const d of allDrafts()) {
-      if (d.status === 'posting') {
+      if (d.status !== 'posting') continue
+      const posted = typeof d.threadPartsPosted === 'number' ? d.threadPartsPosted : 0
+      if (d.threadRootId && posted > 0) {
+        await updateDraft(d.id, {
+          status: 'failed',
+          error:
+            `Interrupted after publishing ${posted} part(s) of a thread. ` +
+            `Retry will continue remaining parts without re-posting earlier ones.`,
+        })
+      } else {
         await updateDraft(d.id, {
           status: 'failed',
           error:
@@ -122,14 +131,25 @@ async function failDraft(id: string, message: string): Promise<{ ok: boolean; me
   return { ok: false, message }
 }
 
+type ThreadPublishOpts = {
+  draftId: string
+  /** Resume from a previous partial publish (never re-post earlier parts). */
+  resumeRootId?: string
+  resumePartsPosted?: number
+  resumePermalink?: string
+}
+
 /**
  * Publish a top-level post; if text exceeds Threads max chars, split into
  * numbered parts (1/3, 2/3, 3/3) and reply each subsequent part under the root.
+ * Progress is persisted after each part so a failed/retry mid-thread does not
+ * re-post part 1 (the classic 1/2 duplicate bug).
  */
 async function publishPostMaybeThread(
   cfg: { accessToken: string; userId: string },
   text: string,
-  imageUrl?: string
+  imageUrl: string | undefined,
+  opts: ThreadPublishOpts
 ): Promise<{ id: string; permalink?: string; parts: number }> {
   if (!needsThreadSplit(text)) {
     const res = await publishPost(cfg, text, imageUrl)
@@ -141,15 +161,65 @@ async function publishPostMaybeThread(
     const res = await publishPost(cfg, parts[0], imageUrl)
     return { ...res, parts: 1 }
   }
-  // First part is the root post (image only on root).
-  const root = await publishPost(cfg, parts[0], imageUrl)
-  const rootId = root.id
-  for (let i = 1; i < parts.length; i++) {
+
+  let rootId = (opts.resumeRootId ?? '').trim()
+  let partsPosted =
+    typeof opts.resumePartsPosted === 'number' && Number.isFinite(opts.resumePartsPosted)
+      ? Math.max(0, Math.floor(opts.resumePartsPosted))
+      : 0
+  let permalink = opts.resumePermalink
+
+  // Resume: if we already have a root, never re-publish part 1.
+  if (rootId && partsPosted < 1) partsPosted = 1
+
+  if (partsPosted >= parts.length && rootId) {
+    return { id: rootId, permalink, parts: parts.length }
+  }
+
+  if (!rootId || partsPosted < 1) {
+    // First part is the root post (image only on root).
+    const root = await publishPost(cfg, parts[0], imageUrl)
+    rootId = root.id
+    permalink = root.permalink
+    partsPosted = 1
+    try {
+      await updateDraft(opts.draftId, {
+        threadRootId: rootId,
+        threadPartsPosted: 1,
+        threadsMediaId: rootId,
+        permalink,
+      })
+    } catch (err) {
+      console.error(`[scheduler] could not persist thread progress after part 1`, err)
+    }
+  }
+
+  for (let i = partsPosted; i < parts.length; i++) {
     // Stagger so Meta containers settle; always reply to root for a flat 1/n thread.
     await delay(1800)
-    await publishReply(cfg, parts[i], rootId)
+    try {
+      await publishReply(cfg, parts[i], rootId)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      // Keep progress so the next retry continues from i (not from 0).
+      throw new Error(
+        `Thread part ${i + 1}/${parts.length} failed after ${partsPosted}/${parts.length} live: ${msg}`
+      )
+    }
+    partsPosted = i + 1
+    try {
+      await updateDraft(opts.draftId, {
+        threadRootId: rootId,
+        threadPartsPosted: partsPosted,
+        threadsMediaId: rootId,
+        permalink,
+      })
+    } catch (err) {
+      console.error(`[scheduler] could not persist thread progress after part ${partsPosted}`, err)
+    }
   }
-  return { id: rootId, permalink: root.permalink, parts: parts.length }
+
+  return { id: rootId, permalink, parts: parts.length }
 }
 
 export async function postDraftNow(id: string): Promise<{ ok: boolean; message: string }> {
@@ -181,12 +251,19 @@ export async function postDraftNow(id: string): Promise<{ ok: boolean; message: 
     const res =
       draft.kind === 'reply'
         ? { ...(await publishReply(cfg, text, draft.replyToId!)), parts: 1 }
-        : await publishPostMaybeThread(cfg, text, draft.imageUrl)
+        : await publishPostMaybeThread(cfg, text, draft.imageUrl, {
+            draftId: id,
+            resumeRootId: draft.threadRootId,
+            resumePartsPosted: draft.threadPartsPosted,
+            resumePermalink: draft.permalink,
+          })
     try {
       await updateDraft(id, {
         status: 'posted',
         postedAt: Date.now(),
         threadsMediaId: res.id,
+        threadRootId: res.parts > 1 ? res.id : draft.threadRootId,
+        threadPartsPosted: res.parts > 1 ? res.parts : draft.threadPartsPosted,
         permalink: res.permalink,
         error: undefined,
       })

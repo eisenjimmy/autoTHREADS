@@ -179,6 +179,10 @@ export interface Draft {
   scheduledAt?: number
   postedAt?: number
   threadsMediaId?: string
+  /** Root media id after part 1 of a multi-part thread publishes (resume support). */
+  threadRootId?: string
+  /** How many numbered parts are already live (1 after root). Retry continues from here. */
+  threadPartsPosted?: number
   permalink?: string
   error?: string
   createdAt: number
