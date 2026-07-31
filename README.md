@@ -11,7 +11,7 @@ control, or hand the wheel to a self-running agent that posts and replies on its
 
 <br />
 
-![Version](https://img.shields.io/badge/version-0.2.18-111111?style=flat-square)
+![Version](https://img.shields.io/badge/version-0.2.19-111111?style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-111111?style=flat-square)
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-111111?style=flat-square)
 <br />
@@ -33,7 +33,7 @@ control, or hand the wheel to a self-running agent that posts and replies on its
 ---
 
 > [!TIP]
-> **Current release: v0.2.18.** **Local vision** for reply images, **current date/time** in system
+> **Current release: v0.2.19.** **Local vision** for reply images, **current date/time** in system
 > prompts, **side mission**, **long posts as 1/n threads**, recent-post memory (default 5), news
 > source links, dual timers, and **EN/한국어** Settings + Full-Auto. See
 > [Full-Auto](#-full-auto-mode) and [CHANGELOG.md](CHANGELOG.md).
@@ -252,7 +252,7 @@ npm run package:win    # Windows
 npm run package:all    # both
 ```
 
-Prebuilt macOS + Windows installers: [GitHub Releases](https://github.com/eisenjimmy/autoTHREADS/releases) (latest **v0.2.18**).
+Prebuilt macOS + Windows installers: [GitHub Releases](https://github.com/eisenjimmy/autoTHREADS/releases) (latest **v0.2.19**).
 
 > Apps are not notarized yet. On first open: right-click → **Open** (or allow under Privacy & Security).
 
@@ -565,7 +565,7 @@ npm run build
 npm start
 ```
 
-설치 파일 (macOS + Windows): [Releases](https://github.com/eisenjimmy/autoTHREADS/releases) (최신 **v0.2.18**)
+설치 파일 (macOS + Windows): [Releases](https://github.com/eisenjimmy/autoTHREADS/releases) (최신 **v0.2.19**)
 
 ## AI 설정
 

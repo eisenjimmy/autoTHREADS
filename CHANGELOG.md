@@ -9,6 +9,21 @@ Session-level notes also live under `_changelog/`.
 
 ---
 
+## [0.2.19] — 2026-07-31
+
+### Fixed
+
+- **Multi-part Threads posts (1/n … n/n):** progress is saved and verified after each part so a failed **2/2** retry no longer re-posts **1/2**.
+- Autopilot **resumes incomplete threads first** instead of planning a new post while a partial thread is open.
+- `failDraft` keeps `threadRootId` / `threadPartsPosted`; errors include `root=` for safe resume.
+- Local LLM: serialize completions + sequential autopilot phases (fewer ECONNREFUSED races on single-slot llama-server).
+
+### Notes
+
+- Install the macOS **DMG** from GitHub Releases. Unsigned — right-click → Open the first time, or `xattr -cr /Applications/AutoThreads.app`.
+
+---
+
 ## [0.2.18] — 2026-07-31
 
 ### Fixed

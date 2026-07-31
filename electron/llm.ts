@@ -288,15 +288,33 @@ type ChatContentPart =
   | { type: 'text'; text: string }
   | { type: 'image_url'; image_url: { url: string } }
 
-const IMAGE_FETCH_TIMEOUT_MS = 25_000
-const MAX_VISION_IMAGES = 3
-const MAX_IMAGE_BYTES = 6 * 1024 * 1024 // 6MB per image
+const IMAGE_FETCH_TIMEOUT_MS = 20_000
+const MAX_VISION_IMAGES = 1
+/** Keep payloads small — multi‑MB base64 + system prompt blows 4k ctx / crashes slots. */
+const MAX_IMAGE_BYTES = 900 * 1024 // ~900KB
+/** Vision + long system prompts routinely take 20–50s on a single GPU slot. */
+const VISION_TIMEOUT_MS = 180_000
 
 /**
- * After llama.cpp returns "image input is not supported / mmproj", skip vision
- * for the rest of this process so we don't fail every image reply.
+ * Permanent kill-switch only for true "no mmproj / image not supported".
+ * Transient ECONNREFUSED after a vision POST must NOT set this forever.
  */
 let localVisionDisabledReason: string | null = null
+
+/**
+ * Serialize every local completion. Jarvis llama-server uses --parallel 1;
+ * concurrent post + vision reply races cause "works once then ECONNREFUSED".
+ */
+let localLlmChain: Promise<unknown> = Promise.resolve()
+
+function withLocalLlmLock<T>(fn: () => Promise<T>): Promise<T> {
+  const run = localLlmChain.then(fn, fn)
+  localLlmChain = run.then(
+    () => undefined,
+    () => undefined
+  )
+  return run
+}
 
 /** Clean model ids like "gemma4-v2." that some UIs leave with trailing junk. */
 function cleanModelId(model: string): string {
@@ -432,8 +450,25 @@ function extractAssistantText(label: string, status: number, body: string): stri
   throw new Error(`${label}: response had no message content — ${snippet(body)}`)
 }
 
-<<<<<<< Updated upstream
-=======
+
+/** Network / crash codes seen when a local server dies on multimodal POSTs. */
+function isTransientVisionTransportError(message: string): boolean {
+  const hay = message.toLowerCase()
+  return (
+    hay.includes('econnrefused') ||
+    hay.includes('econnreset') ||
+    hay.includes('econnaborted') ||
+    hay.includes('epipe') ||
+    hay.includes('socket hang up') ||
+    hay.includes('fetch failed') ||
+    hay.includes('network') ||
+    hay.includes('timed out') ||
+    hay.includes('timeout') ||
+    hay.includes('und_err') ||
+    hay.includes('other side closed')
+  )
+}
+
 function textOnlyFallbackUser(user: string): string {
   return (
     user +
@@ -455,11 +490,15 @@ function modelsProbeUrl(chatUrl: string): string {
   }
 }
 
-async function waitForLocalServer(chatUrl: string, attempts = 6, delayMs = 500): Promise<boolean> {
+async function waitForLocalServer(
+  chatUrl: string,
+  attempts = 12,
+  delayMs = 750
+): Promise<boolean> {
   const probe = modelsProbeUrl(chatUrl)
   for (let i = 0; i < attempts; i++) {
     try {
-      const res = await request(probe, { method: 'GET' }, 3_000)
+      const res = await request(probe, { method: 'GET' }, 4_000)
       if (res.ok || res.status === 401 || res.status === 403) return true
     } catch {
       /* still down */
@@ -482,14 +521,18 @@ async function retryTextOnlyAfterVisionFailure(
   system: string,
   user: string,
   sampling: Json,
-  reason: string
+  reason: string,
+  /** Permanent disable only for true "no mmproj" — not transient crashes. */
+  permanentDisable: boolean
 ): Promise<string> {
-  localVisionDisabledReason = reason
+  if (permanentDisable) {
+    localVisionDisabledReason = reason
+  }
   console.warn(
-    `[llm] local vision failed — falling back to text-only for this session. ` +
-      `Detail: ${reason}. ` +
-      `If the local server crashed on images, raise --ubatch-size >= --image-max-tokens ` +
-      `(Jarvis: JARVIS_UBATCH_SIZE). Text-only continues without attaching images.`
+    `[llm] local vision failed — text-only retry. Detail: ${reason}. ` +
+      (permanentDisable
+        ? 'Vision disabled for this process (server rejected images / no mmproj).'
+        : 'Vision will be tried again next time if the server is healthy.')
   )
   const up = await waitForLocalServer(url)
   if (!up) {
@@ -501,7 +544,6 @@ async function retryTextOnlyAfterVisionFailure(
   return chatCompletion(label, url, headers, modelId, system, textOnlyFallbackUser(user), sampling, undefined)
 }
 
->>>>>>> Stashed changes
 async function chatCompletion(
   label: string,
   url: string,
@@ -519,6 +561,9 @@ async function chatCompletion(
   const urls = (imageUrls ?? []).filter((u) => typeof u === 'string' && u.trim())
   const built = await buildUserContent(user, urls)
   const sentImages = built.imageCount > 0
+  if (sentImages) {
+    console.info(`[llm] vision: sending ${built.imageCount} image(s) to ${label}`)
+  }
   const body = {
     ...sampling,
     model: modelId,
@@ -527,6 +572,7 @@ async function chatCompletion(
       { role: 'user', content: built.content },
     ],
   }
+  const timeoutMs = sentImages ? VISION_TIMEOUT_MS : GEN_TIMEOUT_MS
   let res: HttpReply
   try {
     res = await request(
@@ -536,27 +582,56 @@ async function chatCompletion(
         headers: { ...headers, 'content-type': 'application/json' },
         body: JSON.stringify(body),
       },
-      GEN_TIMEOUT_MS
+      timeoutMs
     )
   } catch (err) {
-    throw new Error(`${label}: ${describeError(err)}`)
+    const detail = describeError(err)
+    // Any transport failure after we attached images → text-only (server may
+    // still be up for text, or recover after a brief crash).
+    if (sentImages && isTransientVisionTransportError(detail)) {
+      return retryTextOnlyAfterVisionFailure(
+        label,
+        url,
+        headers,
+        modelId,
+        system,
+        user,
+        sampling,
+        detail || 'connection failed on vision request',
+        false
+      )
+    }
+    // Non-vision ECONNREFUSED: wait once then retry plain text (busy slot / blip).
+    if (!sentImages && isTransientVisionTransportError(detail)) {
+      const up = await waitForLocalServer(url, 8, 500)
+      if (up) {
+        console.warn(`[llm] ${label} transient ${detail} — retrying text once`)
+        return chatCompletion(label, url, headers, modelId, system, user, sampling, undefined)
+      }
+    }
+    throw new Error(`${label}: ${detail}`)
   }
-  // Text-only local servers (llama.cpp without --mmproj) reject image parts.
-  // Fall back once so replies still work; remember for this process.
-  if (!res.ok && sentImages && isVisionUnsupportedError(res.status, res.body)) {
-    const detail = snippet(res.body)
-    localVisionDisabledReason = detail || 'image input is not supported'
-    console.warn(
-      `[llm] local vision rejected by server — falling back to text-only for this session. ` +
-        `Detail: ${localVisionDisabledReason}. ` +
-        `To enable vision with llama.cpp, start the server with a multimodal GGUF + matching --mmproj file.`
-    )
-    const textOnlyUser =
-      user +
-      '\n\n(An image was attached but this local server cannot view images yet. Reply from the text only.)'
-    return chatCompletion(label, url, headers, modelId, system, textOnlyUser, sampling, undefined)
+  if (!res.ok && sentImages) {
+    if (isVisionUnsupportedError(res.status, res.body) || res.status >= 400) {
+      const detail = snippet(res.body) || `HTTP ${res.status}`
+      const permanent = isVisionUnsupportedError(res.status, res.body)
+      return retryTextOnlyAfterVisionFailure(
+        label,
+        url,
+        headers,
+        modelId,
+        system,
+        user,
+        sampling,
+        detail,
+        permanent
+      )
+    }
   }
   if (!res.ok) throw new Error(httpMessage(label, res.status, res.body))
+  if (sentImages) {
+    console.info(`[llm] vision: ${label} accepted multimodal request`)
+  }
   return extractAssistantText(label, res.status, res.body)
 }
 
@@ -591,85 +666,97 @@ export async function generateText(
   const maxTokens = resolveMaxTokens(llm)
   // Vision is intentionally local-only for now (user's OpenAI-compatible vision model).
   let visionUrls = llm.provider === 'local' ? opts?.imageUrls : undefined
+  // Only skip vision for permanent "no mmproj" disables — not after transient crashes.
   if (visionUrls?.length && localVisionDisabledReason) {
     console.warn(`[llm] skipping images (vision disabled this session: ${localVisionDisabledReason})`)
     visionUrls = undefined
   }
-  switch (llm.provider) {
-    case 'claude':
-      return generateClaude(llm.claude, system, user, maxTokens)
-    case 'openai': {
-      if (!llm.openai.apiKey.trim()) throw new Error('OpenAI API key is required')
-      return chatCompletion(
-        'OpenAI',
-        'https://api.openai.com/v1/chat/completions',
-        { authorization: `Bearer ${llm.openai.apiKey}` },
-        cleanModelId(llm.openai.model),
-        system,
-        user,
-        { max_completion_tokens: maxTokens }
-      )
-    }
-    case 'gemini': {
-      if (!llm.gemini.apiKey.trim()) throw new Error('Gemini API key is required')
-      return chatCompletion(
-        'Gemini',
-        `${GEMINI_OPENAI_BASE}/chat/completions`,
-        { authorization: `Bearer ${llm.gemini.apiKey}` },
-        cleanModelId(llm.gemini.model),
-        system,
-        user,
-        { max_tokens: maxTokens, temperature: 0.8 }
-      )
-    }
-    case 'local': {
-      const base = stripTrailingSlashes(llm.local.baseUrl)
-      if (!base) throw new Error('Local LLM base URL is required')
-      const invalid = validateHttpBase(base)
-      if (invalid) throw new Error(`Local LLM: ${invalid}`)
-      const chatUrl = localChatUrl(base)
-      // Fail fast with a clear message when Jarvis/llama-server is not listening.
-      const up = await waitForLocalServer(chatUrl, 2, 200)
-      if (!up) {
-        throw new Error(
-          'Local LLM: ECONNREFUSED — nothing is listening on the configured base URL ' +
-            `(${base}). Start the Jarvis primary llama-server (default http://127.0.0.1:8080).`
+
+  const run = async (): Promise<string> => {
+    switch (llm.provider) {
+      case 'claude':
+        return generateClaude(llm.claude, system, user, maxTokens)
+      case 'openai': {
+        if (!llm.openai.apiKey.trim()) throw new Error('OpenAI API key is required')
+        return chatCompletion(
+          'OpenAI',
+          'https://api.openai.com/v1/chat/completions',
+          { authorization: `Bearer ${llm.openai.apiKey}` },
+          cleanModelId(llm.openai.model),
+          system,
+          user,
+          { max_completion_tokens: maxTokens }
         )
       }
-      const apiKey = llm.local.apiKey.trim()
-      return chatCompletion(
-        'Local LLM',
-        chatUrl,
-        apiKey ? { authorization: `Bearer ${apiKey}` } : {},
-        cleanModelId(llm.local.model),
-        system,
-        user,
-        { max_tokens: maxTokens, temperature: 0.8 },
-        visionUrls
-      )
-    }
-    case 'other': {
-      const base = stripTrailingSlashes(llm.other.baseUrl)
-      if (!base) throw new Error('Other provider base URL is required')
-      const invalid = validateHttpBase(base)
-      if (invalid) throw new Error(`Other provider: ${invalid}`)
-      const extraHeaders = parseHeadersJson(llm.other.headersJson)
-      const bodyOverrides = parseJsonObject('Request JSON', llm.other.bodyJson)
-      // Inject max_tokens unless Request JSON already sets a completion limit.
-      const hasCap =
-        Object.prototype.hasOwnProperty.call(bodyOverrides, 'max_tokens') ||
-        Object.prototype.hasOwnProperty.call(bodyOverrides, 'max_completion_tokens')
-      const sampling: Json = hasCap ? bodyOverrides : { max_tokens: maxTokens, ...bodyOverrides }
-      const apiKey = llm.other.apiKey.trim()
-      return chatCompletion(
-        'Other provider',
-        localChatUrl(base),
-        { ...extraHeaders, ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}) },
-        llm.other.model,
-        system,
-        user,
-        sampling
-      )
+      case 'gemini': {
+        if (!llm.gemini.apiKey.trim()) throw new Error('Gemini API key is required')
+        return chatCompletion(
+          'Gemini',
+          `${GEMINI_OPENAI_BASE}/chat/completions`,
+          { authorization: `Bearer ${llm.gemini.apiKey}` },
+          cleanModelId(llm.gemini.model),
+          system,
+          user,
+          { max_tokens: maxTokens, temperature: 0.8 }
+        )
+      }
+      case 'local': {
+        const base = stripTrailingSlashes(llm.local.baseUrl)
+        if (!base) throw new Error('Local LLM base URL is required')
+        const invalid = validateHttpBase(base)
+        if (invalid) throw new Error(`Local LLM: ${invalid}`)
+        const chatUrl = localChatUrl(base)
+        // Fail fast with a clear message when Jarvis/llama-server is not listening.
+        const up = await waitForLocalServer(chatUrl, 3, 300)
+        if (!up) {
+          throw new Error(
+            'Local LLM: ECONNREFUSED — nothing is listening on the configured base URL ' +
+              `(${base}). Start the Jarvis primary llama-server (default http://127.0.0.1:8080).`
+          )
+        }
+        const apiKey = llm.local.apiKey.trim()
+        return chatCompletion(
+          'Local LLM',
+          chatUrl,
+          apiKey ? { authorization: `Bearer ${apiKey}` } : {},
+          cleanModelId(llm.local.model),
+          system,
+          user,
+          { max_tokens: maxTokens, temperature: 0.8 },
+          visionUrls
+        )
+      }
+      case 'other': {
+        const base = stripTrailingSlashes(llm.other.baseUrl)
+        if (!base) throw new Error('Other provider base URL is required')
+        const invalid = validateHttpBase(base)
+        if (invalid) throw new Error(`Other provider: ${invalid}`)
+        const extraHeaders = parseHeadersJson(llm.other.headersJson)
+        const bodyOverrides = parseJsonObject('Request JSON', llm.other.bodyJson)
+        // Inject max_tokens unless Request JSON already sets a completion limit.
+        const hasCap =
+          Object.prototype.hasOwnProperty.call(bodyOverrides, 'max_tokens') ||
+          Object.prototype.hasOwnProperty.call(bodyOverrides, 'max_completion_tokens')
+        const sampling: Json = hasCap ? bodyOverrides : { max_tokens: maxTokens, ...bodyOverrides }
+        const apiKey = llm.other.apiKey.trim()
+        return chatCompletion(
+          'Other provider',
+          localChatUrl(base),
+          { ...extraHeaders, ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}) },
+          llm.other.model,
+          system,
+          user,
+          sampling
+        )
+      }
     }
   }
+
+  // Local / localhost "other" must never run concurrent completions against a
+  // single-slot llama-server (post phase + reply vision phase used to race).
+  const usesLocalSlot =
+    llm.provider === 'local' ||
+    (llm.provider === 'other' &&
+      /localhost|127\.0\.0\.1/i.test(stripTrailingSlashes(llm.other.baseUrl)))
+  return usesLocalSlot ? withLocalLlmLock(run) : run()
 }

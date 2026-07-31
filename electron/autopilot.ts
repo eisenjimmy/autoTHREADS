@@ -8,7 +8,7 @@ import {
 } from './threadsApi'
 import { isLocalVisionDisabled, localVisionDisabledMessage } from './llm'
 import { allDrafts, upsertDraft } from './drafts'
-import { postDraftNow } from './scheduler'
+import { isPartialThreadDraft, postDraftNow } from './scheduler'
 import {
   collectRecentPostMemory,
   decideAutopilotPlan,
@@ -321,6 +321,52 @@ async function runPostPhase(
 ): Promise<number> {
   const settings = getSettings()
   const ap = settings.autopilot
+
+  // Mid-thread failures must resume the SAME draft (remaining 2/n… only).
+  // Never plan a new post while a partial thread is waiting.
+  let resumed = 0
+  const partials = allDrafts().filter(
+    (d) => d.kind === 'post' && d.status === 'failed' && isPartialThreadDraft(d)
+  )
+  for (const d of partials) {
+    if (postsToday + resumed >= ap.maxPostsPerDay) break
+    log(
+      'info',
+      tLog(
+        `Resuming multi-part thread (${d.threadPartsPosted ?? '?'} part(s) already live)…`,
+        `이어쓰기: 멀티 파트 스레드 재개 (이미 ${d.threadPartsPosted ?? '?'}단 게시됨)…`
+      )
+    )
+    const res = await postDraftNow(d.id)
+    if (res.ok) {
+      resumed++
+      void db.set(AP_POSTS, postsToday + resumed)
+      log(
+        'post',
+        tLog(
+          `Finished remaining thread parts: ${res.message}`,
+          `남은 스레드 파트 게시 완료: ${res.message}`
+        ),
+        allDrafts().find((x) => x.id === d.id)?.permalink
+      )
+    } else {
+      log(
+        'error',
+        tLog(
+          `Thread resume failed: ${res.message}`,
+          `스레드 이어쓰기 실패: ${res.message}`
+        )
+      )
+      await scheduleRetry('post')
+      // Do not generate a new post this tick — would risk another 1/n duplicate.
+      return resumed
+    }
+  }
+  if (resumed > 0) {
+    // Prefer finishing threads over starting new ones in the same pass.
+    return resumed
+  }
+
   const remainingDay = ap.maxPostsPerDay - postsToday
   const budget = Math.min(ap.maxPostsPerRun, remainingDay)
   if (budget <= 0) {
@@ -540,8 +586,22 @@ async function runPostPhase(
         res.permalink
       )
     } else {
-      log('error', tLog(`Publish failed: ${res.message}`, `게시 실패: ${res.message}`))
+      const failed = allDrafts().find((d) => d.id === draft.id)
+      const partial = failed ? isPartialThreadDraft(failed) : false
+      log(
+        'error',
+        tLog(
+          partial
+            ? `Publish failed mid-thread (will resume remaining parts, not re-post 1/n): ${res.message}`
+            : `Publish failed: ${res.message}`,
+          partial
+            ? `게시 실패 — 스레드 중간 (1/n 재게시 없이 이어서 재시도): ${res.message}`
+            : `게시 실패: ${res.message}`
+        )
+      )
       await scheduleRetry('post')
+      // Stop this planning loop so we don't stack another long post while one is incomplete.
+      if (partial) break
     }
   }
   return created
@@ -789,24 +849,25 @@ async function runReplyPhase(repliesToday: number): Promise<number> {
     const isCreator = handle !== '' && r.username.trim().toLowerCase() === handle
     const contextText = await fetchReplyContext(r.text, r.rootPostText)
     const imageUrls = Array.isArray(r.imageUrls) ? r.imageUrls : undefined
-    if (imageUrls && imageUrls.length > 0) {
+    const hadImages = (imageUrls?.length ?? 0) > 0
+    if (hadImages) {
       const local = settings.llm.provider === 'local'
       const visionOff = local && isLocalVisionDisabled()
       log(
         'info',
         tLog(
-          `Vision: ${imageUrls.length} image(s) on @${r.username}'s ${isMention ? 'mention' : 'reply'}` +
+          `Image: ${imageUrls!.length} on @${r.username}'s ${isMention ? 'mention' : 'reply'}` +
             (visionOff
-              ? ` (text-only — vision off this session: ${localVisionDisabledMessage() ?? 'unsupported'}).`
+              ? ` — vision off this session (${localVisionDisabledMessage() ?? 'unsupported'}), text-only.`
               : local
-                ? ' (local model; auto text-only if vision fails / ECONNREFUSED / no mmproj).'
-                : ' (text-only — vision is Local LLM only).'),
-          `비전: @${r.username} ${isMention ? '멘션' : '답글'}에 이미지 ${imageUrls.length}개` +
+                ? ' — sending to local vision model.'
+                : ' — cloud provider is text-only (no vision).'),
+          `이미지: @${r.username} ${isMention ? '멘션' : '답글'} ${imageUrls!.length}개` +
             (visionOff
-              ? ' (텍스트 폴백 — 이 세션 비전 비활성).'
+              ? ` — 이 세션 비전 꺼짐 (${localVisionDisabledMessage() ?? 'unsupported'}), 텍스트만.`
               : local
-                ? ' (로컬 모델; 비전 실패·ECONNREFUSED·mmproj 없으면 텍스트 폴백).'
-                : ' (텍스트만 — 비전은 로컬 LLM 전용).')
+                ? ' — 로컬 비전 모델로 전송.'
+                : ' — 클라우드 제공자는 텍스트만 (비전 없음).')
         )
       )
     }
@@ -834,6 +895,20 @@ async function runReplyPhase(repliesToday: number): Promise<number> {
             )
       )
       continue
+    }
+    if (hadImages && settings.llm.provider === 'local') {
+      const usedVision = !isLocalVisionDisabled()
+      log(
+        'info',
+        tLog(
+          usedVision
+            ? `Reply draft ready for @${r.username} (vision path available).`
+            : `Reply draft ready for @${r.username} (text-only; vision fell back this session).`,
+          usedVision
+            ? `@${r.username} 답글 초안 완료 (비전 경로 사용 가능).`
+            : `@${r.username} 답글 초안 완료 (텍스트 폴백; 비전 미사용).`
+        )
+      )
     }
     const now = Date.now()
     const draft: Draft = {
@@ -1118,25 +1193,16 @@ async function runAutopilotPass(
       )
     )
     const now = Date.now()
-    // Run phases (possibly both). Stamp each timer when that phase starts.
-    const jobs: Promise<void>[] = []
+    // Run phases SEQUENTIALLY. Local llama-server is typically --parallel 1;
+    // concurrent post+vision reply was the main "works once then ECONNREFUSED" bug.
     if (phases.posts) {
-      jobs.push(
-        (async () => {
-          await db.set(AP_LAST_RUN, now)
-          await runPostPhase(posts, reason)
-        })()
-      )
+      await db.set(AP_LAST_RUN, now)
+      await runPostPhase(posts, reason)
     }
     if (phases.replies) {
-      jobs.push(
-        (async () => {
-          await db.set(AP_LAST_REPLY_RUN, now)
-          await runReplyPhase(getInt(AP_REPLIES))
-        })()
-      )
+      await db.set(AP_LAST_REPLY_RUN, now)
+      await runReplyPhase(getInt(AP_REPLIES))
     }
-    await Promise.all(jobs)
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err)
     log(

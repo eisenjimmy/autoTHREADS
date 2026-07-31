@@ -1,0 +1,17 @@
+version: 0.2.19
+files:
+  - url: AutoThreads-0.2.19-mac.zip
+    sha512: K+aJvrU4Xw41HpHgyxrQrg2fEBDSh1rAMTGvbMDcSTeK+oG6OOK6TCCjpVeuseXEYkEPg7sdoKp12jOQrIP7QQ==
+    size: 124675723
+  - url: AutoThreads-0.2.19-arm64-mac.zip
+    sha512: /c1m5eCCpLgiGvxHoHioJ/Z0Qss6cR/yV+HIPpLLQ09i7gp5valXkz9ACvdqKcxkWLLRpj95bpoJgV7pOb2ozw==
+    size: 122720750
+  - url: AutoThreads-0.2.19.dmg
+    sha512: eOpRUl2fa3sAVvn2IfkityG8D6ydRE9JJKj8z3onm3RgwSf6aQ0IJFSAz/RXp5Cl+MTZE0dNHH1topf9LbLLAQ==
+    size: 125348505
+  - url: AutoThreads-0.2.19-arm64.dmg
+    sha512: yUf2DFAjRDkFPMM9J33h9F0qISajBa5GgWBS+zzevSwl1SiLpdwDp9Y18hr4CnFV1D5xCTDqQ8ok0LPMWsU1eg==
+    size: 123433781
+path: AutoThreads-0.2.19-mac.zip
+sha512: K+aJvrU4Xw41HpHgyxrQrg2fEBDSh1rAMTGvbMDcSTeK+oG6OOK6TCCjpVeuseXEYkEPg7sdoKp12jOQrIP7QQ==
+releaseDate: '2026-07-31T18:19:19.649Z'
