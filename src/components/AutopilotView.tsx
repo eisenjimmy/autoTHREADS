@@ -15,6 +15,7 @@ export default function AutopilotView() {
   const saveSettings = useApp((s) => s.saveSettings)
   const setRunning = useApp((s) => s.setAutopilotRunning)
   const runNow = useApp((s) => s.runAutopilotNow)
+  const resetCounters = useApp((s) => s.resetAutopilotCounters)
   const setView = useApp((s) => s.setView)
   const toast = useApp((s) => s.toast)
 
@@ -28,6 +29,7 @@ export default function AutopilotView() {
         ? ap.replyIntervalMinutes
         : 5,
     replyToMentions: typeof ap.replyToMentions === 'boolean' ? ap.replyToMentions : true,
+    replyToReplies: typeof ap.replyToReplies === 'boolean' ? ap.replyToReplies : false,
     sporadicPosts: typeof ap.sporadicPosts === 'boolean' ? ap.sporadicPosts : true,
     liveNewsInteractive:
       typeof ap.liveNewsInteractive === 'boolean' ? ap.liveNewsInteractive : true,
@@ -51,6 +53,7 @@ export default function AutopilotView() {
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
   const [launching, setLaunching] = useState(false)
+  const [resetting, setResetting] = useState(false)
   const [customCat, setCustomCat] = useState('')
   const [topicInputFocused, setTopicInputFocused] = useState(false)
   const [now, setNow] = useState(Date.now())
@@ -122,6 +125,24 @@ export default function AutopilotView() {
     if (dirty && !(await persist())) return
     toast('ok', t('Running one pass now…', '지금 한 번 실행합니다…'))
     await runNow()
+  }
+
+  const resetDailyCounters = async () => {
+    if (resetting) return
+    const confirmed = window.confirm(
+      t(
+        'Reset today\'s post and reply counters? This does not delete drafts or posted content.',
+        '오늘 게시·답글 카운터를 초기화할까요? 초안이나 이미 게시된 글은 삭제되지 않습니다.'
+      )
+    )
+    if (!confirmed) return
+    setResetting(true)
+    try {
+      await resetCounters()
+      toast('ok', t('Today\'s post and reply counters reset', '오늘 게시·답글 카운터를 초기화했습니다'))
+    } finally {
+      setResetting(false)
+    }
   }
 
   const removeCategory = (id: string) =>
@@ -211,7 +232,7 @@ export default function AutopilotView() {
   }
 
   const nextReplyLabel = (): string => {
-    if (!form.replyToAll && !form.replyToMentions) return t('Off', '끔')
+    if (!form.replyToAll && !form.replyToReplies && !form.replyToMentions) return t('Off', '끔')
     if (busy) return t('Working…', '작동 중…')
     return formatCountdown(status?.nextReplyRunAt)
   }
@@ -290,6 +311,17 @@ export default function AutopilotView() {
               <span className="ap-stat-v">
                 {status?.repliesToday ?? 0} / {status?.maxRepliesPerDay ?? form.maxRepliesPerDay}
               </span>
+            </div>
+            <div className="ap-stat">
+              <span className="ap-stat-k">{t('Quota controls', '한도 관리')}</span>
+              <button
+                className="btn small ghost"
+                type="button"
+                disabled={resetting}
+                onClick={() => void resetDailyCounters()}
+              >
+                {resetting ? t('Resetting…', '초기화 중…') : t('Reset today', '오늘 초기화')}
+              </button>
             </div>
             <div className="ap-stat ap-stat-wide">
               <span className="ap-stat-k">{t('Post timer', '게시 타이머')}</span>
@@ -775,6 +807,22 @@ export default function AutopilotView() {
                 />
                 <span>{t('Reply to replies on my posts', '내 게시물 답글에 응대')}</span>
               </label>
+            </div>
+            <div className="field">
+              <label className="toggle">
+                <input
+                  type="checkbox"
+                  checked={form.replyToReplies}
+                  onChange={(e) => edit({ replyToReplies: e.target.checked })}
+                />
+                <span>{t('Reply to replies to me anywhere', '내가 답글한 글의 후속 답글에도 응대')}</span>
+              </label>
+              <span className="hint">
+                {t(
+                  'Checks replies to your own replies, even when the original post belongs to someone else. Uses /me/replies and threads_read_replies.',
+                  '원글이 다른 사람 글이어도 내가 남긴 답글에 달린 후속 답글을 확인합니다. /me/replies와 threads_read_replies를 사용합니다.'
+                )}
+              </span>
             </div>
             <div className="field">
               <label className="toggle">
