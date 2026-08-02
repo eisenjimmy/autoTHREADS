@@ -71,6 +71,7 @@ export interface AutopilotSettings {
   creatorHandle: string
   creatorAddress: string
   replyToAll: boolean
+  replyToReplies: boolean
   replyToMentions: boolean
   autoReply: boolean
   maxRepliesPerRun: number
@@ -273,6 +274,7 @@ export interface BridgeApi {
   autopilotStatus(): Promise<AutopilotStatus>
   autopilotSetRunning(running: boolean): Promise<AutopilotStatus>
   autopilotRunNow(): Promise<AutopilotStatus>
+  autopilotResetCounters(): Promise<AutopilotStatus>
   openExternal(url: string): Promise<void>
   onDraftsChanged(cb: (drafts: Draft[]) => void): void
   onAutopilotStatus(cb: (status: AutopilotStatus) => void): void
