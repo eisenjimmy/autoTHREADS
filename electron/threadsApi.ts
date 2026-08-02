@@ -440,6 +440,91 @@ async function fetchReplyMessages(
   }
 }
 
+/**
+ * Find direct replies to replies authored by this account, including replies
+ * posted on someone else's root post. This is separate from /me/threads, which
+ * only lets us discover conversations rooted in the account's own posts.
+ */
+async function fetchUnansweredRepliesToMyReplies(
+  cfg: ThreadsCfg
+): Promise<{ replies: UnansweredReply[]; threadCap: ThreadReplyCapStats }> {
+  const me = await apiGet<{ username?: string }>(cfg, '/me', { fields: 'id,username' })
+  const myUsername = (typeof me.username === 'string' ? me.username : '').toLowerCase()
+  const parents = await fetchAllReplyPages(cfg, '/me/replies', 5)
+  const out: UnansweredReply[] = []
+  const cap = MAX_UNANSWERED_REPLIES_PER_THREAD
+  const expandBudget = { left: REPLY_EXPAND_BUDGET }
+  let threadsTruncated = 0
+  let dropped = 0
+
+  // Process sequentially to stay below Meta's reply-read rate limits.
+  for (const parent of parents) {
+    if (typeof parent.id !== 'string' || !parent.id) continue
+    let items: RawReply[]
+    try {
+      const fetched = await fetchReplyMessages(cfg, parent.id, expandBudget)
+      items = fetched.items
+    } catch (err) {
+      console.warn('[threads] could not load replies to own reply ' + parent.id + ':', errText(err))
+      continue
+    }
+
+    const answeredIds = new Set<string>()
+    for (const item of items) {
+      const username = (item.username ?? '').toLowerCase()
+      if (username && myUsername && username === myUsername && typeof item.replied_to?.id === 'string') {
+        answeredIds.add(item.replied_to.id)
+      }
+    }
+
+    const forParent: UnansweredReply[] = []
+    for (const item of items) {
+      if (typeof item.id !== 'string' || !item.id || item.id === parent.id) continue
+      const username = (item.username ?? '').trim()
+      if (!username || (myUsername && username.toLowerCase() === myUsername)) continue
+      // Only direct replies to our reply belong to this switch. Replies to a
+      // different participant in the same conversation stay out of this inbox.
+      if (item.replied_to?.id !== parent.id || answeredIds.has(item.id)) continue
+
+      const imageUrls = extractMediaImageUrls(item)
+      const text =
+        typeof item.text === 'string' && item.text.trim()
+          ? item.text.trim()
+          : imageUrls.length > 0
+            ? '(image reply)'
+            : ''
+      if (!text) continue
+
+      forParent.push({
+        id: item.id,
+        text,
+        username,
+        timestamp: typeof item.timestamp === 'string' ? item.timestamp : '',
+        rootPostId: parent.id,
+        rootPostText:
+          typeof parent.text === 'string' && parent.text.trim() ? parent.text.trim() : '(your reply)',
+        kind: 'reply',
+        ...(imageUrls.length > 0 ? { imageUrls } : {}),
+      })
+    }
+
+    forParent.sort((a, b) => replyTimestamp(b.timestamp) - replyTimestamp(a.timestamp))
+    if (forParent.length > cap) {
+      threadsTruncated++
+      dropped += forParent.length - cap
+      out.push(...forParent.slice(0, cap))
+    } else {
+      out.push(...forParent)
+    }
+  }
+
+  out.sort((a, b) => replyTimestamp(b.timestamp) - replyTimestamp(a.timestamp))
+  return {
+    replies: out,
+    threadCap: { maxPerThread: cap, threadsTruncated, dropped },
+  }
+}
+
 // Bounded probes so a busy account can't fan out into hundreds of answer checks.
 const ANSWER_PROBE_BUDGET = 80
 const REPLY_EXPAND_BUDGET = 60
@@ -774,7 +859,7 @@ export async function fetchUnansweredMentions(
  */
 export async function fetchUnansweredReplies(
   cfg: ThreadsCfg,
-  opts?: { includeMentions?: boolean }
+  opts?: { includeMentions?: boolean; includeRepliesToMe?: boolean }
 ): Promise<UnansweredReply[]> {
   const result = await fetchUnansweredEngagement(cfg, opts)
   return result.replies
@@ -782,7 +867,11 @@ export async function fetchUnansweredReplies(
 
 export async function fetchUnansweredEngagement(
   cfg: ThreadsCfg,
-  opts?: { includeMentions?: boolean; alreadyAnsweredIds?: Set<string> }
+  opts?: {
+    includeMentions?: boolean
+    includeRepliesToMe?: boolean
+    alreadyAnsweredIds?: Set<string>
+  }
 ): Promise<{
   replies: UnansweredReply[]
   mentionError?: string
@@ -791,7 +880,18 @@ export async function fetchUnansweredEngagement(
   threadCap: ThreadReplyCapStats
 }> {
   const includeMentions = opts?.includeMentions !== false
+  const includeRepliesToMe = opts?.includeRepliesToMe === true
   const { replies, threadCap } = await fetchUnansweredPostReplies(cfg)
+  const repliesToMeResult = includeRepliesToMe
+    ? await fetchUnansweredRepliesToMyReplies(cfg)
+    : {
+        replies: [] as UnansweredReply[],
+        threadCap: {
+          maxPerThread: MAX_UNANSWERED_REPLIES_PER_THREAD,
+          threadsTruncated: 0,
+          dropped: 0,
+        },
+      }
   let mentions: UnansweredReply[] = []
   let mentionError: string | undefined
   let mentionRawCount = 0
@@ -803,21 +903,24 @@ export async function fetchUnansweredEngagement(
     mentionRawCount = m.rawCount ?? 0
     mentionSkippedAnswered = m.skippedAnswered ?? 0
   }
-  // Mentions first (higher priority), then post replies; de-dupe by id.
+  // Mentions first, then replies to our replies, then replies on our posts.
+  // De-dupe by id because /me/threads can include a reply we authored too.
   const seen = new Set<string>()
   const out: UnansweredReply[] = []
-  for (const item of [...mentions, ...replies]) {
+  for (const item of [...mentions, ...repliesToMeResult.replies, ...replies]) {
     if (seen.has(item.id)) continue
     seen.add(item.id)
     out.push(item)
   }
-  // Cap inbox size but keep room for nested replies across recent posts.
-  // Keep mention priority when trimming: mentions already lead the list.
   return {
     replies: out.slice(0, 100),
     mentionError,
     mentionRawCount,
     mentionSkippedAnswered,
-    threadCap,
+    threadCap: {
+      maxPerThread: threadCap.maxPerThread,
+      threadsTruncated: threadCap.threadsTruncated + repliesToMeResult.threadCap.threadsTruncated,
+      dropped: threadCap.dropped + repliesToMeResult.threadCap.dropped,
+    },
   }
 }
