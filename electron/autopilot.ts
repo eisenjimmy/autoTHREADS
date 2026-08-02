@@ -165,6 +165,19 @@ function rolloverDaily(): { posts: number; replies: number } {
   return { posts: getInt(AP_POSTS), replies: getInt(AP_REPLIES) }
 }
 
+/** Reset today's post/reply quota counters without touching drafts or answer history. */
+export async function resetAutopilotCounters(): Promise<AutopilotStatus> {
+  const today = dayKey()
+  await db.set(AP_DAY, today)
+  await db.set(AP_POSTS, 0)
+  await db.set(AP_REPLIES, 0)
+  // Keep the discover quota aligned with the main reply quota reset.
+  await db.set(AP_DISCOVER_DAY, today)
+  await db.set(AP_DISCOVER_COUNT, 0)
+  broadcastStatus()
+  return buildAutopilotStatus()
+}
+
 function readLog(): AutopilotLogEntry[] {
   const raw = db.get<AutopilotLogEntry[]>(AP_LOG)
   return Array.isArray(raw) ? raw : []
@@ -192,7 +205,7 @@ export function buildAutopilotStatus(): AutopilotStatus {
   const replies = sameDay ? getInt(AP_REPLIES) : 0
   const lastRunAt = db.get<number>(AP_LAST_RUN) ?? null
   const lastReplyRunAt = db.get<number>(AP_LAST_REPLY_RUN) ?? null
-  const repliesEnabled = ap.replyToAll || ap.replyToMentions || ap.engageDiscover
+  const repliesEnabled = ap.replyToAll || ap.replyToReplies || ap.replyToMentions || ap.engageDiscover
   const nextRunAt = ap.enabled
     ? (typeof lastRunAt === 'number' ? lastRunAt : Date.now()) + ap.intervalMinutes * 60_000
     : null
@@ -245,7 +258,7 @@ async function maybeTick(): Promise<void> {
   // lastRun === 0 means "fire now" (launch / forced reset)
   const duePosts = !postBusy && (lastPost === 0 || now - lastPost >= ap.intervalMinutes * 60_000)
   // Reply timer also drives @mentions and optional discover engagement.
-  const repliesOn = ap.replyToAll || ap.replyToMentions || ap.engageDiscover
+  const repliesOn = ap.replyToAll || ap.replyToReplies || ap.replyToMentions || ap.engageDiscover
   const dueReplies =
     !replyBusy &&
     repliesOn &&
@@ -636,7 +649,7 @@ async function fetchReplyContext(replyText: string, rootText: string): Promise<s
 async function runReplyPhase(repliesToday: number): Promise<number> {
   const settings = getSettings()
   const ap = settings.autopilot
-  if (!ap.replyToAll && !ap.replyToMentions && !ap.engageDiscover) {
+  if (!ap.replyToAll && !ap.replyToReplies && !ap.replyToMentions && !ap.engageDiscover) {
     log(
       'skip',
       tLog(
@@ -680,6 +693,7 @@ async function runReplyPhase(repliesToday: number): Promise<number> {
       }
       const fetched = await fetchUnansweredEngagement(settings.threads, {
         includeMentions: ap.replyToMentions,
+        includeRepliesToMe: ap.replyToReplies,
         alreadyAnsweredIds: priorAnswered,
       })
       if (fetched.mentionError) {
