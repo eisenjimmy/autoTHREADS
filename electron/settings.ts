@@ -77,6 +77,7 @@ export function defaultAutopilot(): AutopilotSettings {
     creatorHandle: '',
     creatorAddress: 'Master',
     replyToAll: true,
+    replyToReplies: false,
     replyToMentions: true,
     autoReply: true,
     maxRepliesPerRun: 15, // allow multiple replies in an ongoing thread per tick
@@ -285,6 +286,7 @@ function normalizeAutopilot(
     creatorHandle: str(r.creatorHandle, '').trim().replace(/^@+/, '').slice(0, 80),
     creatorAddress: str(r.creatorAddress, d.creatorAddress).slice(0, 60),
     replyToAll: typeof r.replyToAll === 'boolean' ? r.replyToAll : d.replyToAll,
+    replyToReplies: typeof r.replyToReplies === 'boolean' ? r.replyToReplies : d.replyToReplies,
     replyToMentions: typeof r.replyToMentions === 'boolean' ? r.replyToMentions : d.replyToMentions,
     autoReply: typeof r.autoReply === 'boolean' ? r.autoReply : d.autoReply,
     // Hard upper bound 20 — matches MAX_UNANSWERED_REPLIES_PER_THREAD per conversation.
