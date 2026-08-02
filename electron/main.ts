@@ -13,6 +13,7 @@ import {
   startAutopilot,
   buildAutopilotStatus,
   runAutopilotNow,
+  resetAutopilotCounters,
   setAutopilotStatusListener,
 } from './autopilot'
 import { db } from './localdb'
@@ -103,6 +104,7 @@ app.whenReady().then(() => {
     return buildAutopilotStatus()
   })
   ipcMain.handle('autopilot:run-now', () => runAutopilotNow())
+  ipcMain.handle('autopilot:reset-counters', () => resetAutopilotCounters())
 
   ipcMain.handle('llm:test', (_e, llm: LlmSettings) => testLlm(llm))
   ipcMain.handle('llm:generate-post', (_e, input: Parameters<typeof generatePostDraft>[0]) =>
@@ -143,6 +145,7 @@ app.whenReady().then(() => {
       // Always include @mentions for the Replies page + Full-Auto.
       const { replies, mentionError, threadCap } = await fetchUnansweredEngagement(threads, {
         includeMentions: true,
+        includeRepliesToMe: true,
       })
       const mentionCount = replies.filter((r) => r.kind === 'mention').length
       const replyCount = replies.length - mentionCount
