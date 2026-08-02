@@ -26,6 +26,7 @@ interface AppState {
   deleteDraft(id: string): Promise<void>
   setAutopilotRunning(running: boolean): Promise<void>
   runAutopilotNow(): Promise<void>
+  resetAutopilotCounters(): Promise<void>
   toast(kind: 'ok' | 'err', text: string): void
   dismissToast(id: number): void
 }
@@ -76,6 +77,15 @@ export const useApp = create<AppState>((set, get) => ({
       set({ autopilot: status })
     } catch (err) {
       get().toast('err', `Autopilot: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  },
+
+  resetAutopilotCounters: async () => {
+    try {
+      const status = await window.api.autopilotResetCounters()
+      set({ autopilot: status })
+    } catch (err) {
+      get().toast('err', `Failed to reset counters: ${err instanceof Error ? err.message : String(err)}`)
     }
   },
 
