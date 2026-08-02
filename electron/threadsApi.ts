@@ -221,12 +221,10 @@ export async function publishReply(
 ): Promise<{ id: string; permalink?: string }> {
   const target = replyToId.trim()
   if (!target) throw new Error('Threads API: reply target id is empty')
-  // Avoid create+publish round-trips against deleted/expired media ids.
-  if (!(await threadsMediaExists(cfg, target))) {
-    throw new Error(
-      `Threads API: reply target ${target} no longer exists (deleted or expired). Skipping this reply.`
-    )
-  }
+  // Do not preflight the target with GET /{id}. The supported Threads reply
+  // flow validates the target when POST /me/threads receives reply_to_id.
+  // A separate media lookup can be denied even when the token can publish
+  // replies, which makes valid replies fail before the create step.
   try {
     return await publish(cfg, text, target)
   } catch (err) {
