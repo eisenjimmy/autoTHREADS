@@ -317,7 +317,7 @@ export default function AutopilotView() {
               <button
                 className="btn small ghost"
                 type="button"
-                disabled={resetting}
+                disabled={resetting || busy}
                 onClick={() => void resetDailyCounters()}
               >
                 {resetting ? t('Resetting…', '초기화 중…') : t('Reset today', '오늘 초기화')}
