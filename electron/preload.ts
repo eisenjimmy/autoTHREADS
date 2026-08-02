@@ -20,6 +20,7 @@ contextBridge.exposeInMainWorld('api', {
   autopilotStatus: () => ipcRenderer.invoke('autopilot:status'),
   autopilotSetRunning: (running: boolean) => ipcRenderer.invoke('autopilot:set-running', running),
   autopilotRunNow: () => ipcRenderer.invoke('autopilot:run-now'),
+  autopilotResetCounters: () => ipcRenderer.invoke('autopilot:reset-counters'),
   openExternal: (url: string) => ipcRenderer.invoke('app:open-external', url),
   onDraftsChanged: (cb: (drafts: unknown) => void) =>
     ipcRenderer.on('drafts:changed', (_e, drafts) => cb(drafts)),
