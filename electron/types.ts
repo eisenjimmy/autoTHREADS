@@ -79,6 +79,7 @@ export interface AutopilotSettings {
   creatorHandle: string       // the creator's Threads @handle (without @)
   creatorAddress: string      // how to address the creator, e.g. "Master"
   replyToAll: boolean         // scan and answer unanswered replies on your posts
+  replyToReplies: boolean      // scan replies to your replies anywhere
   replyToMentions: boolean    // also answer @mentions of your account on others' posts
   autoReply: boolean          // publish replies for real vs draft them
   maxRepliesPerRun: number
