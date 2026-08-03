@@ -1,0 +1,90 @@
+name: Build and publish release assets
+
+on:
+  push:
+    branches:
+      - "release-v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-mac:
+    name: Build macOS DMG and ZIP
+    runs-on: macos-latest
+    steps:
+      - name: Check out release branch
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        uses: npm ci
+
+      - name: Build macOS artifacts
+        run: npm run package:mac
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: autothreads-macos
+          path: |
+            release/*.dmg
+            release/*.zip
+          if-no-files-found: error
+
+  build-windows:
+    name: Build Windows EXE and ZIP
+    runs-on: windows-latest
+    steps:
+      - name: Check out release branch
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Windows artifacts
+        run: npm run package:win
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: autothreads-windows
+          path: |
+            release/*.exe
+            release/*.zip
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub release
+    needs:
+      - build-mac
+      - build-windows
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download packaged assets
+        uses: actions/download-artifact@v4
+        with:
+          pattern: autothreads-*
+          path: release
+          merge-multiple: true
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v0.2.20
+          target_commitish: ${{ github.sha }}
+          name: AutoThreads v0.2.20
+          body_path: .github/release-notes/0.2.20.md
+          files: release/*
+          fail_on_unmatched_files: true
