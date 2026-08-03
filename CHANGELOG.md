@@ -9,6 +9,42 @@ Session-level notes also live under `_changelog/`.
 
 ---
 
+## [0.2.20] — 2026-08-02
+
+### Added
+
+- **Reply to replies to me anywhere** — optionally scan replies authored by you and answer direct follow-ups, not only replies under your own posts.
+- **Reset today** — reset post, reply, and discovery counters without deleting drafts or answer history.
+- Reply handling remains useful when **@mention access is unavailable**; mention failures are surfaced as optional diagnostics instead of stopping ordinary replies.
+
+### Fixed
+
+- Replies no longer perform a separate media-existence preflight that can be denied even when the Threads token can create a reply.
+- Autopilot reply settings, status, and counter controls stay synchronized across launches and saved settings.
+
+### Packaging
+
+- GitHub Actions now builds unsigned macOS **DMG + ZIP** assets and Windows **NSIS EXE + ZIP** assets for tagged releases.
+
+### 한국어
+
+#### 추가
+
+- **어디서든 나에게 달린 답글에 답하기** — 내 게시물 아래의 답글뿐 아니라 내가 작성한 답글에 직접 이어진 후속 답글도 선택적으로 확인합니다.
+- **오늘 카운터 초기화** — 초안과 답변 기록은 유지하면서 게시물, 답글, 검색 카운터를 초기화합니다.
+- **멘션 권한이 없어도 사용 가능** — 멘션 조회 실패는 선택 기능의 진단으로 표시되며 일반 답글 처리는 계속됩니다.
+
+#### 수정
+
+- 답글 작성 권한이 있어도 별도 미디어 조회 권한 때문에 실패할 수 있던 사전 검사를 제거했습니다.
+- 자동화 답글 설정, 상태, 카운터가 저장 설정 및 실행 상태와 일치하도록 정리했습니다.
+
+#### 배포
+
+- 태그 릴리스 시 GitHub Actions가 macOS **DMG + ZIP**, Windows **NSIS EXE + ZIP**을 자동으로 빌드합니다.
+
+---
+
 ## [0.2.19] — 2026-07-31
 
 ### Fixed
@@ -336,5 +372,6 @@ Session-level notes also live under `_changelog/`.
 
 Initial open-source release: Electron + React desktop app for AI-assisted Threads drafts, local/cloud LLM providers, news scraping, image assist, replies, scheduling, and token-first Threads setup.
 
+[0.2.20]: https://github.com/eisenjimmy/autoTHREADS/releases/tag/v0.2.20
 [0.2.0]: https://github.com/eisenjimmy/autoTHREADS/releases/tag/v0.2.0
 [0.1.10]: https://github.com/eisenjimmy/autoTHREADS/releases/tag/v0.1.10
