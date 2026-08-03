@@ -23,7 +23,7 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        uses: npm ci
+        run: npm ci
 
       - name: Build macOS artifacts
         run: npm run package:mac
